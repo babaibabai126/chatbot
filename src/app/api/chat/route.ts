@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
 
 const BUSINESS_KNOWLEDGE = `
@@ -38,13 +37,60 @@ Rules:
 `;
 
 const conversations = new Map<string, Array<{ role: string; content: string }>>();
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 
-async function getZAI() {
-  if (!zaiInstance) {
-    zaiInstance = await ZAI.create();
+interface ZAIConfig {
+  baseUrl: string;
+  apiKey: string;
+  chatId?: string;
+  userId?: string;
+  token?: string;
+}
+
+function getZAIConfig(): ZAIConfig {
+  const baseUrl = process.env.ZAI_BASE_URL || 'https://internal-api.z.ai/v1';
+  const apiKey = process.env.ZAI_API_KEY || 'Z.ai';
+  const chatId = process.env.ZAI_CHAT_ID;
+  const userId = process.env.ZAI_USER_ID;
+  const token = process.env.ZAI_TOKEN;
+
+  return { baseUrl, apiKey, chatId, userId, token };
+}
+
+async function callZAI(messages: Array<{ role: string; content: string }>) {
+  const config = getZAIConfig();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${config.apiKey}`,
+    'X-Z-AI-From': 'Z',
+  };
+
+  if (config.chatId) {
+    headers['X-Chat-Id'] = config.chatId;
   }
-  return zaiInstance;
+  if (config.userId) {
+    headers['X-User-Id'] = config.userId;
+  }
+  if (config.token) {
+    headers['X-Token'] = config.token;
+  }
+
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      messages,
+      thinking: { type: 'disabled' },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`ZAI API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || null;
 }
 
 export async function POST(request: NextRequest) {
@@ -89,15 +135,10 @@ export async function POST(request: NextRequest) {
       history = [history[0], ...history.slice(-20)];
     }
 
-    const zai = await getZAI();
-    const completion = await zai.chat.completions.create({
-      messages: history,
-      thinking: { type: 'disabled' },
-    });
+    const aiResponse = await callZAI(history);
 
-    const aiResponse = completion.choices[0]?.message?.content;
     if (!aiResponse) {
-      return NextResponse.json({ error: 'Empty response' }, { status: 500 });
+      return NextResponse.json({ error: 'Empty response from AI' }, { status: 500 });
     }
 
     history.push({ role: 'assistant', content: aiResponse });
