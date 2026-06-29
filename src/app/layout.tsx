@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,12 +14,41 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#059669",
+};
+
 export const metadata: Metadata = {
-  title: "Z Business Solutions - AI Chatbot",
-  description: "Z Business Solutions এর AI চ্যাটবট | AI Chatbot for Z Business Solutions - IT Services & Digital Solutions",
-  keywords: ["Z Business Solutions", "Chatbot", "IT Services", "Digital Solutions", "Bangladesh"],
+  title: "AAROHAN Business Hub - বিজনেস ম্যানেজমেন্ট",
+  description:
+    "আপনার সব বিজনেস এক জায়গায় — বিল, কোটেশন, খরচ, পেমেন্ট ম্যানেজমেন্ট AI চ্যাটবট সহ | All-in-one business management with AI chatbot",
+  keywords: [
+    "Aarohan", "Business", "Bill", "Quotation", "Expense", "Payment", "Bangladesh", "বিজনেস", "বিল",
+  ],
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "AarohanHub",
+  },
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: [
+      { url: "/icons/icon-96x96.png", sizes: "96x96", type: "image/png" },
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512x512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
+  openGraph: {
+    title: "AAROHAN Business Hub",
+    description: "All-in-one business management with AI chatbot",
+    type: "website",
   },
 };
 
@@ -29,11 +59,27 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="bn" suppressHydrationWarning>
+      <head>
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         {children}
         <Toaster />
+        <PWAInstallPrompt />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js');
+                });
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   );
