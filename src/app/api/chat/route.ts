@@ -75,22 +75,36 @@ async function callZAI(messages: Array<{ role: string; content: string }>) {
     headers['X-Token'] = config.token;
   }
 
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      messages,
-      thinking: { type: 'disabled' },
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`ZAI API error: ${response.status} - ${errorText}`);
+  try {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        messages,
+        thinking: { type: 'disabled' },
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`ZAI API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || null;
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('ZAI API request timed out after 30 seconds');
+    }
+    throw err;
   }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || null;
 }
 
 export async function POST(request: NextRequest) {
