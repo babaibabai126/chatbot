@@ -1,425 +1,324 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { useAppStore, ViewType } from '@/lib/store';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Card } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import {
-  Send,
-  Bot,
-  User,
-  RotateCcw,
-  MessageCircle,
-  Clock,
-  Phone,
-  Mail,
-  MapPin,
+  LayoutDashboard,
+  Users,
+  FileText,
+  Receipt,
+  Wallet,
+  CreditCard,
+  AlertCircle,
+  MessageSquare,
+  ChevronLeft,
+  ChevronRight,
+  Building2,
   Sparkles,
-  Loader2,
-  Globe,
-  ChevronDown,
+  Menu,
+  X,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import DashboardView from '@/components/views/dashboard-view';
+import ClientsView from '@/components/views/clients-view';
+import BillsView from '@/components/views/bills-view';
+import QuotationsView from '@/components/views/quotations-view';
+import ExpensesView from '@/components/views/expenses-view';
+import PaymentsView from '@/components/views/payments-view';
+import DuesView from '@/components/views/dues-view';
+import ChatPanel from '@/components/views/chat-panel';
 
-interface Message {
+interface Business {
   id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
+  name: string;
+  type: string;
+  isActive: boolean;
 }
 
-const QUICK_ACTIONS = [
-  { id: '1', label: 'সেবাসমূহ / Services', labelBn: 'সেবাসমূহ', labelEn: 'Services', message: 'আপনাদের কি কি সেবা আছে? / What services do you offer?' },
-  { id: '2', label: 'মূল্য / Pricing', labelBn: 'মূল্য', labelEn: 'Pricing', message: 'সেবার মূল্য কত? / What are your prices?' },
-  { id: '3', label: 'যোগাযোগ / Contact', labelBn: 'যোগাযোগ', labelEn: 'Contact', message: 'যোগাযোগের তথ্য দিন / Give me your contact details' },
-  { id: '4', label: 'কার্যসময় / Hours', labelBn: 'কার্যসময়', labelEn: 'Hours', message: 'কার্যসময় কখন? / What are your business hours?' },
-  { id: '5', label: 'ফ্রি কনসালটেশন', labelBn: 'ফ্রি কনসালটেশন', labelEn: 'Free Consultation', message: 'ফ্রি কনসালটেশন আছে কি? / Is there a free consultation?' },
-  { id: '6', label: 'পেমেন্ট / Payment', labelBn: 'পেমেন্ট', labelEn: 'Payment', message: 'পেমেন্ট পদ্ধতি কি কি? / What payment methods do you accept?' },
-];
+interface BusinessMenu {
+  id: string;
+  name: string;
+  type: string;
+  menus: { id: ViewType; label: string; labelBn: string; icon: React.ReactNode }[];
+}
+
+const BUSINESS_MENUS: Record<string, { id: ViewType; label: string; labelBn: string; icon: React.ReactNode }[]> = {
+  'AAROHAN TECH SOLUTIONS': [
+    { id: 'dashboard', label: 'Dashboard', labelBn: 'ড্যাশবোর্ড', icon: <LayoutDashboard className="h-4 w-4" /> },
+    { id: 'clients', label: 'Clients', labelBn: 'ক্লায়েন্ট', icon: <Users className="h-4 w-4" /> },
+    { id: 'bills', label: 'Bills', labelBn: 'বিল', icon: <FileText className="h-4 w-4" /> },
+    { id: 'quotations', label: 'Quotations', labelBn: 'কোটেশন', icon: <Receipt className="h-4 w-4" /> },
+    { id: 'expenses', label: 'Expenses', labelBn: 'খরচ', icon: <Wallet className="h-4 w-4" /> },
+    { id: 'payments', label: 'Payments', labelBn: 'পেমেন্ট', icon: <CreditCard className="h-4 w-4" /> },
+    { id: 'dues', label: 'Dues', labelBn: 'বকেয়া', icon: <AlertCircle className="h-4 w-4" /> },
+  ],
+  default: [
+    { id: 'dashboard', label: 'Dashboard', labelBn: 'ড্যাশবোর্ড', icon: <LayoutDashboard className="h-4 w-4" /> },
+    { id: 'clients', label: 'Clients', labelBn: 'ক্লায়েন্ট', icon: <Users className="h-4 w-4" /> },
+    { id: 'bills', label: 'Bills', labelBn: 'বিল', icon: <FileText className="h-4 w-4" /> },
+    { id: 'quotations', label: 'Quotations', labelBn: 'কোটেশন', icon: <Receipt className="h-4 w-4" /> },
+    { id: 'expenses', label: 'Expenses', labelBn: 'খরচ', icon: <Wallet className="h-4 w-4" /> },
+    { id: 'payments', label: 'Payments', labelBn: 'পেমেন্ট', icon: <CreditCard className="h-4 w-4" /> },
+    { id: 'dues', label: 'Dues', labelBn: 'বকেয়া', icon: <AlertCircle className="h-4 w-4" /> },
+  ],
+};
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [sessionId, setSessionId] = useState('');
-  const [showWelcome, setShowWelcome] = useState(true);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const { selectedBusinessId, selectedBusinessName, currentView, chatOpen, sidebarOpen, setSelectedBusiness, setCurrentView, toggleChat, setSidebarOpen } = useAppStore();
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Generate session ID on mount
-  useEffect(() => {
-    setSessionId(
-      `session-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
-    );
-  }, []);
-
-  // Auto-scroll to bottom
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isLoading]);
-
-  // Focus input on mount
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  const sendMessage = useCallback(
-    async (messageText: string) => {
-      if (!messageText.trim() || isLoading) return;
-
-      const userMessage: Message = {
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: messageText.trim(),
-        timestamp: new Date(),
-      };
-
-      setMessages((prev) => [...prev, userMessage]);
-      setInput('');
-      setIsLoading(true);
-      setShowWelcome(false);
-
-      try {
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            message: messageText.trim(),
-          }),
-        });
-
-        const data = await response.json();
-
-        if (data.success && data.response) {
-          const assistantMessage: Message = {
-            id: `assistant-${Date.now()}`,
-            role: 'assistant',
-            content: data.response,
-            timestamp: new Date(),
-          };
-          setMessages((prev) => [...prev, assistantMessage]);
-        } else {
-          const errorMessage: Message = {
-            id: `error-${Date.now()}`,
-            role: 'assistant',
-            content:
-              'দুঃখিত, একটি সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন অথবা আমাদের সরাসরি কল করুন: +880 1712-345678\n\nSorry, something went wrong. Please try again or call us directly: +880 1712-345678',
-            timestamp: new Date(),
-          };
-          setMessages((prev) => [...prev, errorMessage]);
-        }
-      } catch {
-        const errorMessage: Message = {
-          id: `error-${Date.now()}`,
-          role: 'assistant',
-          content:
-            'নেটওয়ার্ক সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।\n\nNetwork error occurred. Please try again.',
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-      } finally {
-        setIsLoading(false);
-        inputRef.current?.focus();
+  const fetchBusinesses = useCallback(async () => {
+    try {
+      const res = await fetch('/api/business');
+      const data = await res.json();
+      setBusinesses(data);
+      if (data.length > 0 && !selectedBusinessId) {
+        setSelectedBusiness(data[0].id, data[0].name);
       }
-    },
-    [isLoading, sessionId]
-  );
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    sendMessage(input);
-  };
-
-  const handleQuickAction = (message: string) => {
-    sendMessage(message);
-  };
-
-  const resetChat = async () => {
-    if (sessionId) {
-      try {
-        await fetch(`/api/chat?sessionId=${sessionId}`, { method: 'DELETE' });
-      } catch {
-        // ignore
-      }
+    } catch (err) {
+      console.error('Failed to fetch businesses:', err);
+    } finally {
+      setLoading(false);
     }
-    setMessages([]);
-    setShowWelcome(true);
-    setSessionId(
-      `session-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
-    );
-    inputRef.current?.focus();
+  }, [selectedBusinessId, setSelectedBusiness]);
+
+  useEffect(() => {
+    fetchBusinesses();
+  }, [fetchBusinesses]);
+
+  const menuItems = selectedBusinessName ? (BUSINESS_MENUS[selectedBusinessName] || BUSINESS_MENUS.default) : [];
+
+  const renderView = () => {
+    if (!selectedBusinessId) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center">
+            <Building2 className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-500">Select a Business</h2>
+            <p className="text-gray-400 mt-1">বাম পাশ থেকে বিজনেস সিলেক্ট করুন</p>
+          </div>
+        </div>
+      );
+    }
+
+    switch (currentView) {
+      case 'dashboard': return <DashboardView businessId={selectedBusinessId} businessName={selectedBusinessName || ''} />;
+      case 'clients': return <ClientsView businessId={selectedBusinessId} />;
+      case 'bills': return <BillsView businessId={selectedBusinessId} />;
+      case 'quotations': return <QuotationsView businessId={selectedBusinessId} />;
+      case 'expenses': return <ExpensesView businessId={selectedBusinessId} businessName={selectedBusinessName || ''} />;
+      case 'payments': return <PaymentsView businessId={selectedBusinessId} />;
+      case 'dues': return <DuesView businessId={selectedBusinessId} />;
+      default: return <DashboardView businessId={selectedBusinessId} businessName={selectedBusinessName || ''} />;
+    }
   };
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('bn-BD', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="h-10 w-10 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-500">লোড হচ্ছে... / Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-gray-50 via-white to-gray-50">
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100 shadow-sm">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <Avatar className="h-10 w-10 bg-emerald-500 shadow-md">
-                <AvatarFallback className="bg-emerald-500 text-white font-bold text-sm">
-                  ZB
-                </AvatarFallback>
-              </Avatar>
-              <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-emerald-400 border-2 border-white rounded-full" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-gray-900 leading-tight">
-                Z Business Solutions
-              </h1>
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 bg-emerald-400 rounded-full animate-pulse" />
-                <span className="text-xs text-gray-500">
-                  অনলাইন / Online
-                </span>
-              </div>
-            </div>
-          </div>
+    <div className="min-h-screen flex bg-gray-50">
+      {/* Desktop Sidebar */}
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} hidden md:flex flex-col bg-white border-r border-gray-200 transition-all duration-300 shrink-0`}>
+        {/* Logo */}
+        <div className="p-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
-            <Badge
-              variant="secondary"
-              className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200"
-            >
-              <Globe className="h-3 w-3 mr-1" />
-              বাংলা | EN
-            </Badge>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={resetChat}
-              className="h-9 w-9 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-              title="নতুন চ্যাট / New Chat"
-            >
-              <RotateCcw className="h-4 w-4" />
-            </Button>
+            <div className="h-8 w-8 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
+              <Building2 className="h-4 w-4 text-white" />
+            </div>
+            {sidebarOpen && (
+              <div className="overflow-hidden">
+                <h1 className="text-sm font-bold text-gray-900 truncate">AAROHAN HUB</h1>
+                <p className="text-[10px] text-gray-400">Business Manager</p>
+              </div>
+            )}
           </div>
         </div>
-      </header>
 
-      {/* Chat Area */}
-      <main className="flex-1 overflow-hidden">
-        <div className="max-w-3xl mx-auto h-full flex flex-col">
-          <ScrollArea className="flex-1 px-4" ref={scrollRef}>
-            <div className="py-6 space-y-4">
-              {/* Welcome Screen */}
-              {showWelcome && messages.length === 0 && (
-                <div className="space-y-6 animate-in fade-in duration-500">
-                  {/* Welcome Hero */}
-                  <div className="text-center py-8">
-                    <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-emerald-50 mb-4 shadow-sm">
-                      <Bot className="h-10 w-10 text-emerald-600" />
-                    </div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                      স্বাগতম! / Welcome!
-                    </h2>
-                    <p className="text-gray-500 max-w-md mx-auto leading-relaxed">
-                      আমি আপনার AI সহকারী। Z Business Solutions সম্পর্কে
-                      যেকোনো প্রশ্ন করুন।
-                      <br />
-                      <span className="text-sm">
-                        I&apos;m your AI assistant. Ask me anything about Z
-                        Business Solutions.
-                      </span>
-                    </p>
-                  </div>
-
-                  {/* Info Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                    <div className="bg-white rounded-xl p-3 border border-gray-100 shadow-sm text-center hover:shadow-md transition-shadow">
-                      <Phone className="h-5 w-5 text-emerald-500 mx-auto mb-1.5" />
-                      <p className="text-xs font-medium text-gray-700">কল করুন</p>
-                      <p className="text-[10px] text-gray-400">Call Us</p>
-                    </div>
-                    <div className="bg-white rounded-xl p-3 border border-gray-100 shadow-sm text-center hover:shadow-md transition-shadow">
-                      <Mail className="h-5 w-5 text-blue-500 mx-auto mb-1.5" />
-                      <p className="text-xs font-medium text-gray-700">ইমেইল</p>
-                      <p className="text-[10px] text-gray-400">Email</p>
-                    </div>
-                    <div className="bg-white rounded-xl p-3 border border-gray-100 shadow-sm text-center hover:shadow-md transition-shadow">
-                      <Clock className="h-5 w-5 text-amber-500 mx-auto mb-1.5" />
-                      <p className="text-xs font-medium text-gray-700">সময়সূচি</p>
-                      <p className="text-[10px] text-gray-400">Hours</p>
-                    </div>
-                    <div className="bg-white rounded-xl p-3 border border-gray-100 shadow-sm text-center hover:shadow-md transition-shadow">
-                      <MapPin className="h-5 w-5 text-rose-500 mx-auto mb-1.5" />
-                      <p className="text-xs font-medium text-gray-700">লোকেশন</p>
-                      <p className="text-[10px] text-gray-400">Location</p>
-                    </div>
-                  </div>
-
-                  {/* Quick Actions */}
-                  <div>
-                    <p className="text-sm font-medium text-gray-400 mb-3 text-center">
-                      <Sparkles className="h-4 w-4 inline mr-1" />
-                      দ্রুত প্রশ্ন / Quick Questions
-                    </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {QUICK_ACTIONS.map((action) => (
-                        <Card
-                          key={action.id}
-                          className="cursor-pointer hover:bg-emerald-50/50 hover:border-emerald-200 transition-all duration-200 py-2.5 px-3 border-gray-100 bg-white group"
-                          onClick={() => handleQuickAction(action.message)}
-                        >
-                          <p className="text-sm font-medium text-gray-700 group-hover:text-emerald-700 transition-colors">
-                            {action.labelBn}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {action.labelEn}
-                          </p>
-                        </Card>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Scroll hint */}
-                  <div className="text-center pt-2">
-                    <ChevronDown className="h-4 w-4 text-gray-300 mx-auto animate-bounce" />
-                  </div>
-                </div>
-              )}
-
-              {/* Messages */}
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex gap-2.5 ${
-                    msg.role === 'user' ? 'justify-end' : 'justify-start'
-                  } animate-in slide-in-from-bottom-2 duration-300`}
-                >
-                  {msg.role === 'assistant' && (
-                    <Avatar className="h-8 w-8 mt-1 shrink-0">
-                      <AvatarFallback className="bg-emerald-500 text-white text-xs">
-                        <Bot className="h-4 w-4" />
-                      </AvatarFallback>
-                    </Avatar>
-                  )}
-                  <div
-                    className={`max-w-[80%] sm:max-w-[70%] ${
-                      msg.role === 'user' ? '' : ''
+        {/* Business List */}
+        <ScrollArea className="flex-1">
+          <div className="p-2">
+            {businesses.map((biz) => {
+              const isActive = selectedBusinessId === biz.id;
+              const menus = BUSINESS_MENUS[biz.name] || BUSINESS_MENUS.default;
+              return (
+                <div key={biz.id} className="mb-2">
+                  <button
+                    onClick={() => { setSelectedBusiness(biz.id, biz.name); setCurrentView('dashboard'); }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${
+                      isActive
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    <div
-                      className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                        msg.role === 'user'
-                          ? 'bg-emerald-600 text-white rounded-br-md'
-                          : 'bg-white text-gray-800 border border-gray-100 shadow-sm rounded-bl-md'
-                      }`}
-                    >
-                      {msg.role === 'assistant' ? (
-                        <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-headings:text-gray-800">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
-                        </div>
-                      ) : (
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
-                      )}
+                    <div className={`h-6 w-6 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                      isActive ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'
+                    }`}>
+                      {biz.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
                     </div>
-                    <p
-                      className={`text-[10px] text-gray-400 mt-1 ${
-                        msg.role === 'user' ? 'text-right' : 'text-left'
-                      }`}
-                    >
-                      {formatTime(msg.timestamp)}
-                    </p>
-                  </div>
-                  {msg.role === 'user' && (
-                    <Avatar className="h-8 w-8 mt-1 shrink-0">
-                      <AvatarFallback className="bg-gray-700 text-white text-xs">
-                        <User className="h-4 w-4" />
-                      </AvatarFallback>
-                    </Avatar>
+                    {sidebarOpen && (
+                      <div className="overflow-hidden">
+                        <p className="text-xs font-semibold truncate">{biz.name}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{biz.type}</p>
+                      </div>
+                    )}
+                  </button>
+
+                  {/* Sub-menus */}
+                  {isActive && sidebarOpen && (
+                    <div className="ml-4 mt-1 space-y-0.5">
+                      {menus.map((menu) => (
+                        <button
+                          key={menu.id}
+                          onClick={() => setCurrentView(menu.id)}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-all ${
+                            currentView === menu.id
+                              ? 'bg-emerald-100 text-emerald-700 font-medium'
+                              : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                          }`}
+                        >
+                          {menu.icon}
+                          <span>{menu.labelBn}</span>
+                          <span className="text-gray-300">/</span>
+                          <span>{menu.label}</span>
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
-              ))}
+              );
+            })}
+          </div>
+        </ScrollArea>
 
-              {/* Loading Indicator */}
-              {isLoading && (
-                <div className="flex gap-2.5 justify-start animate-in slide-in-from-bottom-2 duration-300">
-                  <Avatar className="h-8 w-8 mt-1 shrink-0">
-                    <AvatarFallback className="bg-emerald-500 text-white text-xs">
-                      <Bot className="h-4 w-4" />
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="bg-white rounded-2xl rounded-bl-md px-4 py-3 border border-gray-100 shadow-sm">
-                    <div className="flex items-center gap-1.5">
-                      <Loader2 className="h-4 w-4 text-emerald-500 animate-spin" />
-                      <span className="text-xs text-gray-400">
-                        টাইপ করছে... / Typing...
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
+        {/* Sidebar toggle */}
+        <div className="p-2 border-t border-gray-100">
+          <Button variant="ghost" size="sm" className="w-full justify-center" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </Button>
+        </div>
+      </aside>
 
-              {/* Quick actions in chat (after first response) */}
-              {messages.length > 0 && !isLoading && (
-                <div className="flex flex-wrap gap-1.5 justify-center pt-2">
-                  {QUICK_ACTIONS.slice(0, 4).map((action) => (
-                    <Button
-                      key={action.id}
-                      variant="outline"
-                      size="sm"
-                      className="text-xs h-7 rounded-full border-gray-200 text-gray-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
-                      onClick={() => handleQuickAction(action.message)}
-                    >
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
-              )}
+      {/* Mobile header + drawer */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+        <button onClick={() => setMobileMenuOpen(true)} className="p-1">
+          <Menu className="h-5 w-5 text-gray-600" />
+        </button>
+        <h1 className="text-sm font-bold text-gray-900">
+          {selectedBusinessName || 'AAROHAN HUB'}
+        </h1>
+        <button onClick={toggleChat} className="p-1">
+          <MessageSquare className="h-5 w-5 text-emerald-600" />
+        </button>
+      </div>
+
+      {/* Mobile drawer */}
+      {mobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
+          <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl overflow-y-auto">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-sm font-bold">AAROHAN HUB</h2>
+              <button onClick={() => setMobileMenuOpen(false)}>
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
             </div>
-          </ScrollArea>
-
-          {/* Input Area */}
-          <div className="border-t border-gray-100 bg-white/80 backdrop-blur-xl p-4">
-            <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    ref={inputRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder="আপনার প্রশ্ন লিখুন... / Type your question..."
-                    disabled={isLoading}
-                    className="w-full h-11 pl-4 pr-4 rounded-xl border-gray-200 bg-gray-50 focus:bg-white focus:border-emerald-300 focus:ring-emerald-200 transition-all text-sm"
-                    style={{ fontSize: '16px' }}
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  disabled={!input.trim() || isLoading}
-                  className="h-11 w-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-md hover:shadow-lg transition-all shrink-0"
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-              <p className="text-[10px] text-gray-400 text-center mt-2">
-                <MessageCircle className="h-3 w-3 inline mr-0.5" />
-                AI সহকারী আপনাকে সাহায্য করতে প্রস্তুত / AI assistant ready to
-                help
-              </p>
-            </form>
+            <div className="p-2">
+              {businesses.map((biz) => {
+                const isActive = selectedBusinessId === biz.id;
+                const menus = BUSINESS_MENUS[biz.name] || BUSINESS_MENUS.default;
+                return (
+                  <div key={biz.id} className="mb-2">
+                    <button
+                      onClick={() => { setSelectedBusiness(biz.id, biz.name); setCurrentView('dashboard'); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left ${
+                        isActive ? 'bg-emerald-50 text-emerald-700' : 'text-gray-600'
+                      }`}
+                    >
+                      <div className={`h-6 w-6 rounded flex items-center justify-center text-[10px] font-bold ${
+                        isActive ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'
+                      }`}>
+                        {biz.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold">{biz.name}</p>
+                        <p className="text-[10px] text-gray-400">{biz.type}</p>
+                      </div>
+                    </button>
+                    {isActive && (
+                      <div className="ml-4 mt-1 space-y-0.5">
+                        {menus.map((menu) => (
+                          <button
+                            key={menu.id}
+                            onClick={() => { setCurrentView(menu.id); setMobileMenuOpen(false); }}
+                            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs ${
+                              currentView === menu.id ? 'bg-emerald-100 text-emerald-700 font-medium' : 'text-gray-500'
+                            }`}
+                          >
+                            {menu.icon}
+                            <span>{menu.labelBn}</span>
+                            <span className="text-gray-300">/</span>
+                            <span>{menu.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col min-w-0">
+        {/* Top bar */}
+        <header className="hidden md:flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-bold text-gray-900">
+              {menuItems.find(m => m.id === currentView)?.labelBn || 'ড্যাশবোর্ড'}
+            </h2>
+            <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
+              {selectedBusinessName}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleChat}
+              className="gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              AI সহকারী
+            </Button>
+          </div>
+        </header>
+
+        {/* View Content */}
+        <div className="flex-1 overflow-auto pt-14 md:pt-0">
+          {renderView()}
+        </div>
       </main>
+
+      {/* Chat Panel */}
+      {chatOpen && selectedBusinessId && (
+        <ChatPanel businessId={selectedBusinessId} businessName={selectedBusinessName || ''} />
+      )}
     </div>
   );
 }
