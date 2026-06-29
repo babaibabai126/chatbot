@@ -22,6 +22,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
+import { ThemeToggle } from '@/components/theme-toggle';
 import DashboardView from '@/components/views/dashboard-view';
 import ClientsView from '@/components/views/clients-view';
 import BillsView from '@/components/views/bills-view';
@@ -130,9 +131,9 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex bg-gray-50">
+    <div className="min-h-screen flex bg-gray-50 dark:bg-gray-950">
       {/* Desktop Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} hidden md:flex flex-col bg-white border-r border-gray-200 transition-all duration-300 shrink-0`}>
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} hidden md:flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 shrink-0`}>
         {/* Logo */}
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
@@ -204,9 +205,10 @@ export default function Home() {
           </div>
         </ScrollArea>
 
-        {/* Sidebar toggle */}
-        <div className="p-2 border-t border-gray-100">
-          <Button variant="ghost" size="sm" className="w-full justify-center" onClick={() => setSidebarOpen(!sidebarOpen)}>
+        {/* Sidebar toggle + Theme */}
+        <div className="p-2 border-t border-gray-100 flex items-center gap-1">
+          <ThemeToggle />
+          <Button variant="ghost" size="sm" className="flex-1 justify-center" onClick={() => setSidebarOpen(!sidebarOpen)}>
             {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
         </div>
@@ -220,9 +222,12 @@ export default function Home() {
         <h1 className="text-sm font-bold text-gray-900">
           {selectedBusinessName || 'AAROHAN HUB'}
         </h1>
-        <button onClick={toggleChat} className="p-1">
-          <MessageSquare className="h-5 w-5 text-emerald-600" />
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button onClick={toggleChat} className="p-1">
+            <MessageSquare className="h-5 w-5 text-emerald-600" />
+          </button>
+        </div>
       </div>
 
       {/* Mobile drawer */}
@@ -297,11 +302,12 @@ export default function Home() {
             </Badge>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button
               variant="outline"
               size="sm"
               onClick={toggleChat}
-              className="gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+              className="gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-950"
             >
               <Sparkles className="h-3.5 w-3.5" />
               AI সহকারী
