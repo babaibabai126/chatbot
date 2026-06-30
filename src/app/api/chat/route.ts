@@ -236,9 +236,9 @@ function detectIntent(message: string): DetectedIntent | null {
   const lower = message.toLowerCase().trim();
 
   // ── Create Bill / Invoice ──
-  if (lower.match(/(create|make|generate|নতুন|তৈরি)\s*(a\s*)?(gst\s*)?(bill|invoice|বিল|চালান)/) ||
+  if (lower.match(/(create|make|generate|নতুন|তৈরি)\s*(an?\s*)?(gst\s*)?(bill|invoice|বিল|চালান)/) ||
       lower.match(/(bill|invoice|বিল|চালান)\s*(create|make|generate|নতুন|তৈরি)/) ||
-      lower.match(/(create|make|generate)\s*(a\s*)?(gst|non.?gst)\s*(bill|invoice)/)) {
+      lower.match(/(create|make|generate)\s*(an?\s*)?(gst|non.?gst)\s*(bill|invoice)/)) {
     const args: Record<string, unknown> = {};
 
     // Detect bill type
@@ -271,7 +271,7 @@ function detectIntent(message: string): DetectedIntent | null {
   }
 
   // ── Add / Create Client ──
-  if (lower.match(/(add|create|নতুন|যোগ|তৈরি)\s*(a\s*)?(new\s*)?(client|customer|ক্লায়েন্ট|গ্রাহক)/) ||
+  if (lower.match(/(add|create|নতুন|যোগ|তৈরি)\s*(an?\s*)?(new\s*)?(client|customer|ক্লায়েন্ট|গ্রাহক)/) ||
       lower.match(/(client|customer|ক্লায়েন্ট|গ্রাহক)\s*(add|create|নতুন|যোগ|তৈরি)/)) {
     const args: Record<string, unknown> = {};
 
@@ -291,7 +291,7 @@ function detectIntent(message: string): DetectedIntent | null {
   }
 
   // ── Add / Record Expense ──
-  if (lower.match(/(add|record|log|create|যোগ|রেকর্ড|খরচ)\s*(a\s*)?(new\s*)?(expense|খরচ|expenditure)/) ||
+  if (lower.match(/(add|record|log|create|যোগ|রেকর্ড|খরচ)\s*(an?\s*)?(new\s*)?(expense|খরচ|expenditure)/) ||
       lower.match(/(expense|খরচ)\s*(add|record|log|create|যোগ|রেকর্ড)/)) {
     const args: Record<string, unknown> = {};
 
@@ -320,7 +320,7 @@ function detectIntent(message: string): DetectedIntent | null {
   }
 
   // ── Record Payment ──
-  if (lower.match(/(record|received?|got|পেয়েছি|পেলাম|জমা)\s*(a\s*)?(payment|পেমেন্ট|টাকা)/) ||
+  if (lower.match(/(record|received?|got|পেয়েছি|পেলাম|জমা)\s*(an?\s*)?(payment|পেমেন্ট|টাকা)/) ||
       lower.match(/(payment|পেমেন্ট)\s*(received?|from|record|জমা)/)) {
     const args: Record<string, unknown> = {};
 
@@ -340,8 +340,9 @@ function detectIntent(message: string): DetectedIntent | null {
   }
 
   // ── Get Dues ──
-  if (lower.match(/(show|check|what|list|দেখ|দেখাও|কত)\s*(are\s*)?(my\s*)?(dues|outstanding|unpaid|overdue|বকেয়া|বকেয়া)/) ||
-      lower.match(/(dues|বকেয়া)\s*(show|check|list|দেখ|দেখাও)/)) {
+  if (lower.match(/(show|check|what|list|দেখ|দেখাও|কত)\s*(are\s*)?(my\s*)?(dues|outstanding|unpaid|overdue|বকেয়া|বাকি)/) ||
+      lower.match(/(dues|বকেয়া|বাকি)\s*(show|check|list|দেখ|দেখাও)/) ||
+      lower.includes('dues') || lower.includes('বকেয়া') || lower.includes('বাকি কত')) {
     const args: Record<string, unknown> = {};
     if (lower.includes('overdue') || lower.includes('past due')) args.filter = 'overdue';
     else if (lower.includes('upcoming')) args.filter = 'upcoming';
@@ -361,13 +362,15 @@ function detectIntent(message: string): DetectedIntent | null {
 
   // ── List Clients ──
   if (lower.match(/(show|list|see|দেখ|দেখাও|তালিকা)\s*(all\s*)?(clients?|customers?|ক্লায়েন্ট|গ্রাহক)/) ||
-      lower.match(/(clients?|ক্লায়েন্ট)\s*(show|list|see|দেখ|দেখাও)/)) {
+      lower.match(/(clients?|ক্লায়েন্ট)\s*(show|list|see|দেখ|দেখাও)/) ||
+      lower === 'clients' || lower === 'ক্লায়েন্ট') {
     return { action: 'list_clients', args: {}, confidence: 0.9 };
   }
 
   // ── List Bills ──
   if (lower.match(/(show|list|see|দেখ|দেখাও|তালিকা)\s*(all\s*)?(bills?|invoices?|বিল|চালান)/) ||
-      lower.match(/(bills?|invoices?|বিল)\s*(show|list|see|দেখ|দেখাও)/)) {
+      lower.match(/(bills?|invoices?|বিল)\s*(show|list|see|দেখ|দেখাও)/) ||
+      lower === 'bills' || lower === 'বিল') {
     const args: Record<string, unknown> = {};
     if (lower.includes('paid')) args.status = 'paid';
     else if (lower.includes('unpaid')) args.status = 'unpaid';
