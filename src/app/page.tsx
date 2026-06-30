@@ -5,7 +5,6 @@ import { useAppStore, ViewType } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import {
   LayoutDashboard,
   Users,
@@ -21,6 +20,8 @@ import {
   Sparkles,
   Menu,
   X,
+  Rocket,
+  GraduationCap,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import DashboardView from '@/components/views/dashboard-view';
@@ -39,33 +40,26 @@ interface Business {
   isActive: boolean;
 }
 
-interface BusinessMenu {
-  id: string;
-  name: string;
-  type: string;
-  menus: { id: ViewType; label: string; labelBn: string; icon: React.ReactNode }[];
+// AAROHAN TECH SOLUTIONS sub-menus - English only
+const AAROHAN_MENUS: { id: ViewType; label: string; icon: React.ReactNode }[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
+  { id: 'clients', label: 'Clients', icon: <Users className="h-4 w-4" /> },
+  { id: 'bills', label: 'Bills', icon: <FileText className="h-4 w-4" /> },
+  { id: 'quotations', label: 'Quotations', icon: <Receipt className="h-4 w-4" /> },
+  { id: 'expenses', label: 'Expenses', icon: <Wallet className="h-4 w-4" /> },
+  { id: 'payments', label: 'Payments', icon: <CreditCard className="h-4 w-4" /> },
+  { id: 'dues', label: 'Dues', icon: <AlertCircle className="h-4 w-4" /> },
+];
+
+// Check if business has sub-menus (only AAROHAN TECH SOLUTIONS)
+function hasSubMenus(businessName: string): boolean {
+  return businessName === 'AAROHAN TECH SOLUTIONS';
 }
 
-const BUSINESS_MENUS: Record<string, { id: ViewType; label: string; labelBn: string; icon: React.ReactNode }[]> = {
-  'AAROHAN TECH SOLUTIONS': [
-    { id: 'dashboard', label: 'Dashboard', labelBn: 'ড্যাশবোর্ড', icon: <LayoutDashboard className="h-4 w-4" /> },
-    { id: 'clients', label: 'Clients', labelBn: 'ক্লায়েন্ট', icon: <Users className="h-4 w-4" /> },
-    { id: 'bills', label: 'Bills', labelBn: 'বিল', icon: <FileText className="h-4 w-4" /> },
-    { id: 'quotations', label: 'Quotations', labelBn: 'কোটেশন', icon: <Receipt className="h-4 w-4" /> },
-    { id: 'expenses', label: 'Expenses', labelBn: 'খরচ', icon: <Wallet className="h-4 w-4" /> },
-    { id: 'payments', label: 'Payments', labelBn: 'পেমেন্ট', icon: <CreditCard className="h-4 w-4" /> },
-    { id: 'dues', label: 'Dues', labelBn: 'বকেয়া', icon: <AlertCircle className="h-4 w-4" /> },
-  ],
-  default: [
-    { id: 'dashboard', label: 'Dashboard', labelBn: 'ড্যাশবোর্ড', icon: <LayoutDashboard className="h-4 w-4" /> },
-    { id: 'clients', label: 'Clients', labelBn: 'ক্লায়েন্ট', icon: <Users className="h-4 w-4" /> },
-    { id: 'bills', label: 'Bills', labelBn: 'বিল', icon: <FileText className="h-4 w-4" /> },
-    { id: 'quotations', label: 'Quotations', labelBn: 'কোটেশন', icon: <Receipt className="h-4 w-4" /> },
-    { id: 'expenses', label: 'Expenses', labelBn: 'খরচ', icon: <Wallet className="h-4 w-4" /> },
-    { id: 'payments', label: 'Payments', labelBn: 'পেমেন্ট', icon: <CreditCard className="h-4 w-4" /> },
-    { id: 'dues', label: 'Dues', labelBn: 'বকেয়া', icon: <AlertCircle className="h-4 w-4" /> },
-  ],
-};
+// Check if business uses blue theme
+function isBlueTheme(businessName: string): boolean {
+  return businessName === 'AAROHAN TECH SOLUTIONS';
+}
 
 export default function Home() {
   const { selectedBusinessId, selectedBusinessName, currentView, chatOpen, sidebarOpen, setSelectedBusiness, setCurrentView, toggleChat, setSidebarOpen } = useAppStore();
@@ -92,7 +86,10 @@ export default function Home() {
     fetchBusinesses();
   }, [fetchBusinesses]);
 
-  const menuItems = selectedBusinessName ? (BUSINESS_MENUS[selectedBusinessName] || BUSINESS_MENUS.default) : [];
+  const blueTheme = isBlueTheme(selectedBusinessName || '');
+  const showSubMenus = hasSubMenus(selectedBusinessName || '');
+
+  const menuItems = showSubMenus ? AAROHAN_MENUS : [];
 
   const renderView = () => {
     if (!selectedBusinessId) {
@@ -100,8 +97,8 @@ export default function Home() {
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
             <Building2 className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-gray-500">Select a Business</h2>
-            <p className="text-gray-400 mt-1">বাম পাশ থেকে বিজনেস সিলেক্ট করুন</p>
+            <h2 className="text-xl font-semibold text-gray-500 dark:text-gray-400">Select a Business</h2>
+            <p className="text-gray-400 mt-1 dark:text-gray-500">বাম পাশ থেকে বিজনেস সিলেক্ট করুন</p>
           </div>
         </div>
       );
@@ -119,12 +116,52 @@ export default function Home() {
     }
   };
 
+  // Get business icon
+  const getBusinessIcon = (name: string) => {
+    if (name === 'ASTRONAUT STIKERZ') return <Rocket className="h-3 w-3" />;
+    if (name === 'AAROHAN WEB ACADEMY') return <GraduationCap className="h-3 w-3" />;
+    return null;
+  };
+
+  // Get business color scheme
+  const getBusinessColors = (name: string, isActive: boolean) => {
+    if (name === 'AAROHAN TECH SOLUTIONS') {
+      return isActive
+        ? { bg: 'bg-blue-50 dark:bg-blue-950', text: 'text-blue-700 dark:text-blue-400', icon: 'bg-blue-600 text-white', hover: 'hover:bg-blue-50 dark:hover:bg-blue-950' }
+        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' };
+    }
+    if (name === 'ASTRONAUT STIKERZ') {
+      return isActive
+        ? { bg: 'bg-purple-50 dark:bg-purple-950', text: 'text-purple-700 dark:text-purple-400', icon: 'bg-purple-600 text-white', hover: 'hover:bg-purple-50 dark:hover:bg-purple-950' }
+        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' };
+    }
+    if (name === 'AAROHAN WEB ACADEMY') {
+      return isActive
+        ? { bg: 'bg-amber-50 dark:bg-amber-950', text: 'text-amber-700 dark:text-amber-400', icon: 'bg-amber-600 text-white', hover: 'hover:bg-amber-50 dark:hover:bg-amber-950' }
+        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' };
+    }
+    return isActive
+      ? { bg: 'bg-gray-50 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300', icon: 'bg-gray-600 text-white', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' }
+      : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' };
+  };
+
+  // Sub-menu colors based on business
+  const getSubMenuActiveColor = (name: string) => {
+    if (name === 'AAROHAN TECH SOLUTIONS') return 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300';
+    return 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300';
+  };
+
+  const getSubMenuHoverColor = (name: string) => {
+    if (name === 'AAROHAN TECH SOLUTIONS') return 'hover:bg-blue-50 dark:hover:bg-blue-950 hover:text-blue-700 dark:hover:text-blue-300';
+    return 'hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-700';
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="text-center">
-          <div className="h-10 w-10 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-500">লোড হচ্ছে... / Loading...</p>
+          <div className={`h-10 w-10 border-3 ${blueTheme ? 'border-blue-500' : 'border-emerald-500'} border-t-transparent rounded-full animate-spin mx-auto mb-4`} />
+          <p className="text-gray-500 dark:text-gray-400">লোড হচ্ছে... / Loading...</p>
         </div>
       </div>
     );
@@ -135,14 +172,14 @@ export default function Home() {
       {/* Desktop Sidebar */}
       <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} hidden md:flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 shrink-0`}>
         {/* Logo */}
-        <div className="p-4 border-b border-gray-100">
+        <div className="p-4 border-b border-gray-100 dark:border-gray-800">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
+            <div className={`h-8 w-8 rounded-lg ${blueTheme ? 'bg-blue-600' : 'bg-emerald-600'} flex items-center justify-center shrink-0 transition-colors duration-300`}>
               <Building2 className="h-4 w-4 text-white" />
             </div>
             {sidebarOpen && (
               <div className="overflow-hidden">
-                <h1 className="text-sm font-bold text-gray-900 truncate">AAROHAN HUB</h1>
+                <h1 className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">AAROHAN HUB</h1>
                 <p className="text-[10px] text-gray-400">Business Manager</p>
               </div>
             )}
@@ -154,21 +191,18 @@ export default function Home() {
           <div className="p-2">
             {businesses.map((biz) => {
               const isActive = selectedBusinessId === biz.id;
-              const menus = BUSINESS_MENUS[biz.name] || BUSINESS_MENUS.default;
+              const colors = getBusinessColors(biz.name, isActive);
+              const bizIcon = getBusinessIcon(biz.name);
+              const showMenu = isActive && hasSubMenus(biz.name) && sidebarOpen;
+
               return (
                 <div key={biz.id} className="mb-2">
                   <button
                     onClick={() => { setSelectedBusiness(biz.id, biz.name); setCurrentView('dashboard'); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${
-                      isActive
-                        ? 'bg-emerald-50 text-emerald-700'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${colors.bg} ${colors.text}`}
                   >
-                    <div className={`h-6 w-6 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                      isActive ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'
-                    }`}>
-                      {biz.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+                    <div className={`h-6 w-6 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${colors.icon}`}>
+                      {bizIcon || biz.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
                     </div>
                     {sidebarOpen && (
                       <div className="overflow-hidden">
@@ -178,22 +212,20 @@ export default function Home() {
                     )}
                   </button>
 
-                  {/* Sub-menus */}
-                  {isActive && sidebarOpen && (
+                  {/* Sub-menus - Only for AAROHAN TECH SOLUTIONS */}
+                  {showMenu && (
                     <div className="ml-4 mt-1 space-y-0.5">
-                      {menus.map((menu) => (
+                      {AAROHAN_MENUS.map((menu) => (
                         <button
                           key={menu.id}
                           onClick={() => setCurrentView(menu.id)}
                           className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-all ${
                             currentView === menu.id
-                              ? 'bg-emerald-100 text-emerald-700 font-medium'
-                              : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                              ? `${getSubMenuActiveColor(biz.name)} font-medium`
+                              : `text-gray-500 dark:text-gray-400 ${getSubMenuHoverColor(biz.name)}`
                           }`}
                         >
                           {menu.icon}
-                          <span>{menu.labelBn}</span>
-                          <span className="text-gray-300">/</span>
                           <span>{menu.label}</span>
                         </button>
                       ))}
@@ -206,26 +238,26 @@ export default function Home() {
         </ScrollArea>
 
         {/* Sidebar toggle + Theme */}
-        <div className="p-2 border-t border-gray-100 flex items-center gap-1">
+        <div className="p-2 border-t border-gray-100 dark:border-gray-800 flex items-center gap-1">
           <ThemeToggle />
-          <Button variant="ghost" size="sm" className="flex-1 justify-center" onClick={() => setSidebarOpen(!sidebarOpen)}>
+          <Button variant="ghost" size="sm" className="flex-1 justify-center dark:text-gray-400" onClick={() => setSidebarOpen(!sidebarOpen)}>
             {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
         </div>
       </aside>
 
-      {/* Mobile header + drawer */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+      {/* Mobile header */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3 flex items-center justify-between">
         <button onClick={() => setMobileMenuOpen(true)} className="p-1">
-          <Menu className="h-5 w-5 text-gray-600" />
+          <Menu className="h-5 w-5 text-gray-600 dark:text-gray-400" />
         </button>
-        <h1 className="text-sm font-bold text-gray-900">
+        <h1 className="text-sm font-bold text-gray-900 dark:text-gray-100">
           {selectedBusinessName || 'AAROHAN HUB'}
         </h1>
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <button onClick={toggleChat} className="p-1">
-            <MessageSquare className="h-5 w-5 text-emerald-600" />
+            <MessageSquare className={`h-5 w-5 ${blueTheme ? 'text-blue-600' : 'text-emerald-600'}`} />
           </button>
         </div>
       </div>
@@ -234,9 +266,9 @@ export default function Home() {
       {mobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
-          <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl overflow-y-auto">
-            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-sm font-bold">AAROHAN HUB</h2>
+          <div className="absolute left-0 top-0 bottom-0 w-72 bg-white dark:bg-gray-900 shadow-xl overflow-y-auto">
+            <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <h2 className="text-sm font-bold dark:text-gray-100">AAROHAN HUB</h2>
               <button onClick={() => setMobileMenuOpen(false)}>
                 <X className="h-5 w-5 text-gray-400" />
               </button>
@@ -244,38 +276,37 @@ export default function Home() {
             <div className="p-2">
               {businesses.map((biz) => {
                 const isActive = selectedBusinessId === biz.id;
-                const menus = BUSINESS_MENUS[biz.name] || BUSINESS_MENUS.default;
+                const colors = getBusinessColors(biz.name, isActive);
+                const bizIcon = getBusinessIcon(biz.name);
+                const showMenu = isActive && hasSubMenus(biz.name);
+
                 return (
                   <div key={biz.id} className="mb-2">
                     <button
                       onClick={() => { setSelectedBusiness(biz.id, biz.name); setCurrentView('dashboard'); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left ${
-                        isActive ? 'bg-emerald-50 text-emerald-700' : 'text-gray-600'
-                      }`}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left ${colors.bg} ${colors.text}`}
                     >
-                      <div className={`h-6 w-6 rounded flex items-center justify-center text-[10px] font-bold ${
-                        isActive ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'
-                      }`}>
-                        {biz.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+                      <div className={`h-6 w-6 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${colors.icon}`}>
+                        {bizIcon || biz.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
                       </div>
                       <div>
                         <p className="text-xs font-semibold">{biz.name}</p>
                         <p className="text-[10px] text-gray-400">{biz.type}</p>
                       </div>
                     </button>
-                    {isActive && (
+
+                    {/* Sub-menus - Only for AAROHAN TECH SOLUTIONS */}
+                    {showMenu && (
                       <div className="ml-4 mt-1 space-y-0.5">
-                        {menus.map((menu) => (
+                        {AAROHAN_MENUS.map((menu) => (
                           <button
                             key={menu.id}
                             onClick={() => { setCurrentView(menu.id); setMobileMenuOpen(false); }}
                             className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs ${
-                              currentView === menu.id ? 'bg-emerald-100 text-emerald-700 font-medium' : 'text-gray-500'
+                              currentView === menu.id ? `${getSubMenuActiveColor(biz.name)} font-medium` : 'text-gray-500 dark:text-gray-400'
                             }`}
                           >
                             {menu.icon}
-                            <span>{menu.labelBn}</span>
-                            <span className="text-gray-300">/</span>
                             <span>{menu.label}</span>
                           </button>
                         ))}
@@ -292,12 +323,19 @@ export default function Home() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <header className="hidden md:flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200">
+        <header className="hidden md:flex items-center justify-between px-6 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-gray-900">
-              {menuItems.find(m => m.id === currentView)?.labelBn || 'ড্যাশবোর্ড'}
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              {showSubMenus ? (AAROHAN_MENUS.find(m => m.id === currentView)?.label || 'Dashboard') : 'Dashboard'}
             </h2>
-            <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
+            <Badge
+              variant="secondary"
+              className={`text-xs ${
+                blueTheme
+                  ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-800'
+                  : 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
+              }`}
+            >
               {selectedBusinessName}
             </Badge>
           </div>
@@ -307,7 +345,11 @@ export default function Home() {
               variant="outline"
               size="sm"
               onClick={toggleChat}
-              className="gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-950"
+              className={`gap-1.5 ${
+                blueTheme
+                  ? 'text-blue-600 border-blue-200 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-800 dark:hover:bg-blue-950'
+                  : 'text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-950'
+              }`}
             >
               <Sparkles className="h-3.5 w-3.5" />
               AI সহকারী

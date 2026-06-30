@@ -53,7 +53,7 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
         setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: 'assistant', content: 'দুঃখিত, সমস্যা হয়েছে। আবার চেষ্টা করুন।\n\nSorry, something went wrong.', timestamp: new Date() }]);
       }
     } catch {
-      setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: 'assistant', content: 'নেটওয়ার্ক সমস্যা। আবার চেষ্টা করুন।\n\nNetwork error.', timestamp: new Date() }]);
+      setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: 'assistant', content: 'নেটওয়ার্ক সমস্যা। আবার চেষ্টা করুন।\n\nNetwork error. Please try again.', timestamp: new Date() }]);
     } finally {
       setIsLoading(false);
       inputRef.current?.focus();
@@ -67,23 +67,23 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
   ];
 
   return (
-    <div className="w-80 md:w-96 border-l border-gray-200 bg-white flex flex-col shrink-0 h-screen md:h-auto">
+    <div className="w-80 md:w-96 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col shrink-0 h-screen md:h-auto">
       {/* Header */}
-      <div className="p-3 border-b border-gray-100 flex items-center justify-between">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Avatar className="h-7 w-7 bg-emerald-500">
             <AvatarFallback className="bg-emerald-500 text-white text-xs"><Bot className="h-3.5 w-3.5" /></AvatarFallback>
           </Avatar>
           <div>
-            <p className="text-xs font-semibold text-gray-900">AI সহকারী</p>
+            <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">AI সহকারী</p>
             <p className="text-[10px] text-gray-400">{businessName}</p>
           </div>
         </div>
         <div className="flex gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setMessages([]); }}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 dark:text-gray-400" onClick={() => { setMessages([]); }}>
             <RotateCcw className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setChatOpen(false)}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 dark:text-gray-400" onClick={() => setChatOpen(false)}>
             <X className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -95,11 +95,11 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
           {messages.length === 0 && (
             <div className="text-center py-6">
               <Sparkles className="h-8 w-8 text-emerald-400 mx-auto mb-2" />
-              <p className="text-sm text-gray-600 font-medium">নমস্কার! / Hello!</p>
+              <p className="text-sm text-gray-600 dark:text-gray-300 font-medium">নমস্কার! / Hello!</p>
               <p className="text-xs text-gray-400 mt-1">আমি আপনার AI সহকারী। বিল, কোটেশন, খরচ সম্পর্কে জিজ্ঞাসা করুন।</p>
               <div className="mt-3 space-y-1.5">
                 {quickActions.map((q, i) => (
-                  <button key={i} onClick={() => sendMessage(q)} className="block w-full text-left text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors">
+                  <button key={i} onClick={() => sendMessage(q)} className="block w-full text-left text-xs px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors">
                     {q}
                   </button>
                 ))}
@@ -115,10 +115,12 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
                 </Avatar>
               )}
               <div className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
-                msg.role === 'user' ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                msg.role === 'user'
+                  ? 'bg-emerald-600 text-white rounded-br-sm'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-sm'
               }`}>
                 {msg.role === 'assistant' ? (
-                  <div className="prose prose-xs max-w-none prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0">
+                  <div className="prose prose-xs max-w-none prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 dark:prose-invert">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
                 ) : (
@@ -138,7 +140,7 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
               <Avatar className="h-6 w-6 mt-0.5 shrink-0">
                 <AvatarFallback className="bg-emerald-500 text-white text-[9px]"><Bot className="h-3 w-3" /></AvatarFallback>
               </Avatar>
-              <div className="bg-gray-100 rounded-xl rounded-bl-sm px-3 py-2">
+              <div className="bg-gray-100 dark:bg-gray-800 rounded-xl rounded-bl-sm px-3 py-2">
                 <Loader2 className="h-3.5 w-3.5 text-emerald-500 animate-spin" />
               </div>
             </div>
@@ -147,7 +149,7 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
       </ScrollArea>
 
       {/* Input */}
-      <div className="p-3 border-t border-gray-100">
+      <div className="p-3 border-t border-gray-100 dark:border-gray-800">
         <form onSubmit={(e) => { e.preventDefault(); sendMessage(input); }} className="flex gap-2">
           <Input
             ref={inputRef}
@@ -155,7 +157,7 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
             onChange={(e) => setInput(e.target.value)}
             placeholder="প্রশ্ন করুন... / Ask me..."
             disabled={isLoading}
-            className="h-9 text-xs"
+            className="h-9 text-xs dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
             style={{ fontSize: '16px' }}
           />
           <Button type="submit" disabled={!input.trim() || isLoading} className="h-9 w-9 bg-emerald-600 hover:bg-emerald-700 shrink-0">
