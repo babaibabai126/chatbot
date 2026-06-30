@@ -40,35 +40,44 @@ model Client {
 }
 
 model Bill {
-  id          String     @id @default(cuid())
-  businessId  String
-  clientId    String
-  billNumber  String
-  date        DateTime
-  dueDate     DateTime
-  subtotal    Float
-  tax         Float      @default(0)
-  discount    Float      @default(0)
-  total       Float
-  paidAmount  Float      @default(0)
-  status      String     @default("unpaid")
-  notes       String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  business    Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  client      Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  items       BillItem[]
-  payments    Payment[]
+  id            String     @id @default(cuid())
+  businessId    String
+  clientId      String
+  billNumber    String
+  date          DateTime
+  dueDate       DateTime
+  subtotal      Float
+  tax           Float      @default(0)
+  discount      Float      @default(0)
+  total         Float
+  paidAmount    Float      @default(0)
+  status        String     @default("unpaid")
+  notes         String?
+  billType      String     @default("non_gst")  // "gst" or "non_gst"
+  clientGst     String?    // Client GSTIN for GST bills
+  clientAddress String?    // Client address for invoice
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  business      Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  client        Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  items         BillItem[]
+  payments      Payment[]
 }
 
 model BillItem {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   billId      String
   description String
   quantity    Float
   rate        Float
   amount      Float
-  bill        Bill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+  itemName    String? // Item name (separate from description)
+  taxMode     String  @default("excl") // "excl" = Excl. GST, "incl" = Incl. GST
+  cgst        Float   @default(0)
+  sgst        Float   @default(0)
+  igst        Float   @default(0)
+  baseRate    Float   @default(0) // Rate before GST
+  bill        Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
 }
 
 model Quotation {

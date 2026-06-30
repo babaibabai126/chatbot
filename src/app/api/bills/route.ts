@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
-        client: { select: { id: true, name: true, company: true, phone: true } },
+        client: { select: { id: true, name: true, company: true, phone: true, address: true, email: true } },
         items: true,
         payments: true,
       },
@@ -36,7 +36,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { businessId, clientId, billNumber, date, dueDate, subtotal, tax, discount, total, status, notes, items } = body;
+    const {
+      businessId, clientId, billNumber, date, dueDate,
+      subtotal, tax, discount, total, status, notes,
+      billType, clientGst, clientAddress, items
+    } = body;
 
     if (!businessId || !clientId || !billNumber || !date || !dueDate || total === undefined) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -55,12 +59,25 @@ export async function POST(request: NextRequest) {
         total: parseFloat(total) || 0,
         status: status || 'unpaid',
         notes,
+        billType: billType || 'non_gst',
+        clientGst: clientGst || null,
+        clientAddress: clientAddress || null,
         items: {
-          create: (items || []).map((item: { description: string; quantity: number; rate: number; amount: number }) => ({
+          create: (items || []).map((item: {
+            description: string; quantity: number; rate: number; amount: number;
+            itemName?: string; taxMode?: string; cgst?: number; sgst?: number;
+            igst?: number; baseRate?: number;
+          }) => ({
             description: item.description,
             quantity: parseFloat(String(item.quantity)) || 0,
             rate: parseFloat(String(item.rate)) || 0,
             amount: parseFloat(String(item.amount)) || 0,
+            itemName: item.itemName || null,
+            taxMode: item.taxMode || 'excl',
+            cgst: parseFloat(String(item.cgst)) || 0,
+            sgst: parseFloat(String(item.sgst)) || 0,
+            igst: parseFloat(String(item.igst)) || 0,
+            baseRate: parseFloat(String(item.baseRate)) || 0,
           })),
         },
       },
