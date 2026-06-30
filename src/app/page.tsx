@@ -40,7 +40,6 @@ interface Business {
   isActive: boolean;
 }
 
-// AAROHAN TECH SOLUTIONS sub-menus - English only
 const AAROHAN_MENUS: { id: ViewType; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
   { id: 'clients', label: 'Clients', icon: <Users className="h-4 w-4" /> },
@@ -51,12 +50,9 @@ const AAROHAN_MENUS: { id: ViewType; label: string; icon: React.ReactNode }[] = 
   { id: 'dues', label: 'Dues', icon: <AlertCircle className="h-4 w-4" /> },
 ];
 
-// Check if business has sub-menus (only AAROHAN TECH SOLUTIONS)
 function hasSubMenus(businessName: string): boolean {
   return businessName === 'AAROHAN TECH SOLUTIONS';
 }
-
-// Check if business uses blue theme
 function isBlueTheme(businessName: string): boolean {
   return businessName === 'AAROHAN TECH SOLUTIONS';
 }
@@ -88,7 +84,6 @@ export default function Home() {
 
   const blueTheme = isBlueTheme(selectedBusinessName || '');
   const showSubMenus = hasSubMenus(selectedBusinessName || '');
-
   const menuItems = showSubMenus ? AAROHAN_MENUS : [];
 
   const renderView = () => {
@@ -98,12 +93,11 @@ export default function Home() {
           <div className="text-center">
             <Building2 className="h-16 w-16 text-gray-300 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-500 dark:text-gray-400">Select a Business</h2>
-            <p className="text-gray-400 mt-1 dark:text-gray-500">বাম পাশ থেকে বিজনেস সিলেক্ট করুন</p>
+            <p className="text-gray-400 mt-1">বাম পাশ থেকে বিজনেস সিলেক্ট করুন</p>
           </div>
         </div>
       );
     }
-
     switch (currentView) {
       case 'dashboard': return <DashboardView businessId={selectedBusinessId} businessName={selectedBusinessName || ''} />;
       case 'clients': return <ClientsView businessId={selectedBusinessId} />;
@@ -116,36 +110,33 @@ export default function Home() {
     }
   };
 
-  // Get business icon
   const getBusinessIcon = (name: string) => {
     if (name === 'ASTRONAUT STIKERZ') return <Rocket className="h-3 w-3" />;
     if (name === 'AAROHAN WEB ACADEMY') return <GraduationCap className="h-3 w-3" />;
     return null;
   };
 
-  // Get business color scheme
   const getBusinessColors = (name: string, isActive: boolean) => {
     if (name === 'AAROHAN TECH SOLUTIONS') {
       return isActive
-        ? { bg: 'bg-blue-50 dark:bg-blue-950', text: 'text-blue-700 dark:text-blue-400', icon: 'bg-blue-600 text-white', hover: 'hover:bg-blue-50 dark:hover:bg-blue-950' }
-        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' };
+        ? { bg: 'bg-blue-50 dark:bg-blue-950', text: 'text-blue-700 dark:text-blue-400', icon: 'bg-blue-600 text-white' }
+        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400' };
     }
     if (name === 'ASTRONAUT STIKERZ') {
       return isActive
-        ? { bg: 'bg-purple-50 dark:bg-purple-950', text: 'text-purple-700 dark:text-purple-400', icon: 'bg-purple-600 text-white', hover: 'hover:bg-purple-50 dark:hover:bg-purple-950' }
-        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' };
+        ? { bg: 'bg-purple-50 dark:bg-purple-950', text: 'text-purple-700 dark:text-purple-400', icon: 'bg-purple-600 text-white' }
+        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400' };
     }
     if (name === 'AAROHAN WEB ACADEMY') {
       return isActive
-        ? { bg: 'bg-amber-50 dark:bg-amber-950', text: 'text-amber-700 dark:text-amber-400', icon: 'bg-amber-600 text-white', hover: 'hover:bg-amber-50 dark:hover:bg-amber-950' }
-        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' };
+        ? { bg: 'bg-amber-50 dark:bg-amber-950', text: 'text-amber-700 dark:text-amber-400', icon: 'bg-amber-600 text-white' }
+        : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400' };
     }
     return isActive
-      ? { bg: 'bg-gray-50 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300', icon: 'bg-gray-600 text-white', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' }
-      : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400', hover: 'hover:bg-gray-50 dark:hover:bg-gray-800' };
+      ? { bg: 'bg-gray-50 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300', icon: 'bg-gray-600 text-white' }
+      : { bg: '', text: 'text-gray-600 dark:text-gray-400', icon: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400' };
   };
 
-  // Sub-menu colors based on business
   const getSubMenuActiveColor = (name: string) => {
     if (name === 'AAROHAN TECH SOLUTIONS') return 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300';
     return 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300';
@@ -161,7 +152,7 @@ export default function Home() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="text-center">
           <div className={`h-10 w-10 border-3 ${blueTheme ? 'border-blue-500' : 'border-emerald-500'} border-t-transparent rounded-full animate-spin mx-auto mb-4`} />
-          <p className="text-gray-500 dark:text-gray-400">লোড হচ্ছে... / Loading...</p>
+          <p className="text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
       </div>
     );
@@ -171,7 +162,6 @@ export default function Home() {
     <div className="min-h-screen flex bg-gray-50 dark:bg-gray-950">
       {/* Desktop Sidebar */}
       <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} hidden md:flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 shrink-0`}>
-        {/* Logo */}
         <div className="p-4 border-b border-gray-100 dark:border-gray-800">
           <div className="flex items-center gap-2">
             <div className={`h-8 w-8 rounded-lg ${blueTheme ? 'bg-blue-600' : 'bg-emerald-600'} flex items-center justify-center shrink-0 transition-colors duration-300`}>
@@ -186,7 +176,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Business List */}
         <ScrollArea className="flex-1">
           <div className="p-2">
             {businesses.map((biz) => {
@@ -199,9 +188,9 @@ export default function Home() {
                 <div key={biz.id} className="mb-2">
                   <button
                     onClick={() => { setSelectedBusiness(biz.id, biz.name); setCurrentView('dashboard'); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${colors.bg} ${colors.text}`}
+                    className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-left transition-all ${colors.bg} ${colors.text}`}
                   >
-                    <div className={`h-6 w-6 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${colors.icon}`}>
+                    <div className={`h-7 w-7 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${colors.icon}`}>
                       {bizIcon || biz.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
                     </div>
                     {sidebarOpen && (
@@ -212,14 +201,13 @@ export default function Home() {
                     )}
                   </button>
 
-                  {/* Sub-menus - Only for AAROHAN TECH SOLUTIONS */}
                   {showMenu && (
                     <div className="ml-4 mt-1 space-y-0.5">
                       {AAROHAN_MENUS.map((menu) => (
                         <button
                           key={menu.id}
                           onClick={() => setCurrentView(menu.id)}
-                          className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-all ${
+                          className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-all ${
                             currentView === menu.id
                               ? `${getSubMenuActiveColor(biz.name)} font-medium`
                               : `text-gray-500 dark:text-gray-400 ${getSubMenuHoverColor(biz.name)}`
@@ -237,7 +225,6 @@ export default function Home() {
           </div>
         </ScrollArea>
 
-        {/* Sidebar toggle + Theme */}
         <div className="p-2 border-t border-gray-100 dark:border-gray-800 flex items-center gap-1">
           <ThemeToggle />
           <Button variant="ghost" size="sm" className="flex-1 justify-center dark:text-gray-400" onClick={() => setSidebarOpen(!sidebarOpen)}>
@@ -247,18 +234,15 @@ export default function Home() {
       </aside>
 
       {/* Mobile header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3 flex items-center justify-between">
-        <button onClick={() => setMobileMenuOpen(true)} className="p-1">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-3 py-2.5 flex items-center justify-between safe-top">
+        <button onClick={() => setMobileMenuOpen(true)} className="p-2 -ml-1 min-w-[44px] min-h-[44px] flex items-center justify-center">
           <Menu className="h-5 w-5 text-gray-600 dark:text-gray-400" />
         </button>
-        <h1 className="text-sm font-bold text-gray-900 dark:text-gray-100">
+        <h1 className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate px-2">
           {selectedBusinessName || 'AAROHAN HUB'}
         </h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <ThemeToggle />
-          <button onClick={toggleChat} className="p-1">
-            <MessageSquare className={`h-5 w-5 ${blueTheme ? 'text-blue-600' : 'text-emerald-600'}`} />
-          </button>
         </div>
       </div>
 
@@ -266,10 +250,10 @@ export default function Home() {
       {mobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
-          <div className="absolute left-0 top-0 bottom-0 w-72 bg-white dark:bg-gray-900 shadow-xl overflow-y-auto">
+          <div className="absolute left-0 top-0 bottom-0 w-[280px] bg-white dark:bg-gray-900 shadow-xl overflow-y-auto">
             <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <h2 className="text-sm font-bold dark:text-gray-100">AAROHAN HUB</h2>
-              <button onClick={() => setMobileMenuOpen(false)}>
+              <button onClick={() => setMobileMenuOpen(false)} className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center">
                 <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
@@ -284,25 +268,24 @@ export default function Home() {
                   <div key={biz.id} className="mb-2">
                     <button
                       onClick={() => { setSelectedBusiness(biz.id, biz.name); setCurrentView('dashboard'); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left ${colors.bg} ${colors.text}`}
+                      className={`w-full flex items-center gap-2 px-3 py-3 rounded-lg text-left min-h-[48px] ${colors.bg} ${colors.text}`}
                     >
-                      <div className={`h-6 w-6 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${colors.icon}`}>
+                      <div className={`h-7 w-7 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${colors.icon}`}>
                         {bizIcon || biz.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
                       </div>
                       <div>
-                        <p className="text-xs font-semibold">{biz.name}</p>
+                        <p className="text-sm font-semibold">{biz.name}</p>
                         <p className="text-[10px] text-gray-400">{biz.type}</p>
                       </div>
                     </button>
 
-                    {/* Sub-menus - Only for AAROHAN TECH SOLUTIONS */}
                     {showMenu && (
                       <div className="ml-4 mt-1 space-y-0.5">
                         {AAROHAN_MENUS.map((menu) => (
                           <button
                             key={menu.id}
                             onClick={() => { setCurrentView(menu.id); setMobileMenuOpen(false); }}
-                            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs ${
+                            className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-md text-sm min-h-[44px] ${
                               currentView === menu.id ? `${getSubMenuActiveColor(biz.name)} font-medium` : 'text-gray-500 dark:text-gray-400'
                             }`}
                           >
@@ -322,7 +305,7 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* Top bar */}
+        {/* Desktop Top bar - NO chat button here */}
         <header className="hidden md:flex items-center justify-between px-6 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
@@ -339,31 +322,31 @@ export default function Home() {
               {selectedBusinessName}
             </Badge>
           </div>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={toggleChat}
-              className={`gap-1.5 ${
-                blueTheme
-                  ? 'text-blue-600 border-blue-200 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-800 dark:hover:bg-blue-950'
-                  : 'text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-950'
-              }`}
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              AI সহকারী
-            </Button>
-          </div>
+          <ThemeToggle />
         </header>
 
         {/* View Content */}
-        <div className="flex-1 overflow-auto pt-14 md:pt-0">
+        <div className="flex-1 overflow-auto pt-[56px] md:pt-0">
           {renderView()}
         </div>
       </main>
 
-      {/* Chat Panel */}
+      {/* FLOATING CHAT BUTTON - always visible */}
+      {selectedBusinessId && !chatOpen && (
+        <button
+          onClick={toggleChat}
+          className={`fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-95 hover:shadow-xl ${
+            blueTheme
+              ? 'bg-blue-600 hover:bg-blue-700'
+              : 'bg-emerald-600 hover:bg-emerald-700'
+          }`}
+          aria-label="Open AI Assistant"
+        >
+          <MessageSquare className="h-6 w-6 text-white" />
+        </button>
+      )}
+
+      {/* Chat Panel - slides from right */}
       {chatOpen && selectedBusinessId && (
         <ChatPanel businessId={selectedBusinessId} businessName={selectedBusinessName || ''} />
       )}

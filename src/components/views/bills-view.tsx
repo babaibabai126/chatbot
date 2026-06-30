@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, Plus, Trash2, Eye, FileCheck, FileMinus } from 'lucide-react';
+import { FileText, Plus, Trash2, Eye, FileCheck, FileMinus, UserCheck, UserPlus } from 'lucide-react';
 import InvoicePreview from './invoice-preview';
 
 export interface Client { id: string; name: string; company: string | null; phone: string; address: string | null; email: string | null; }
@@ -20,9 +20,9 @@ export interface Bill {
   client: Client; items: BillItem[];
 }
 
-const GST_RATE = 0.18; // 18% GST
-const CGST_RATE = 0.09; // 9% CGST
-const SGST_RATE = 0.09; // 9% SGST
+const GST_RATE = 0.18;
+const CGST_RATE = 0.09;
+const SGST_RATE = 0.09;
 
 export default function BillsView({ businessId }: { businessId: string }) {
   const [bills, setBills] = useState<Bill[]>([]);
@@ -31,9 +31,12 @@ export default function BillsView({ businessId }: { businessId: string }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewBill, setViewBill] = useState<Bill | null>(null);
   const [billType, setBillType] = useState<'gst' | 'non_gst'>('non_gst');
+  const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing');
   const [form, setForm] = useState({
     clientId: '', billNumber: '', date: new Date().toISOString().split('T')[0],
     dueDate: '', discount: '0', notes: '', clientGst: '', clientAddress: '',
+    // New client fields
+    newClientName: '', newClientPhone: '', newClientAddress: '', newClientEmail: '', newClientCompany: '',
   });
   const [items, setItems] = useState<BillItem[]>([{
     description: '', quantity: '1', rate: '0', amount: '0',
@@ -67,15 +70,12 @@ export default function BillsView({ businessId }: { businessId: string }) {
       if (billType === 'gst') {
         const taxMode = newItems[index].taxMode;
         if (taxMode === 'incl') {
-          // Rate includes GST - extract base rate
           const baseRate = r / (1 + GST_RATE);
-          const gstPerUnit = r - baseRate;
           newItems[index].baseRate = baseRate.toFixed(2);
           newItems[index].cgst = (baseRate * CGST_RATE * q).toFixed(2);
           newItems[index].sgst = (baseRate * SGST_RATE * q).toFixed(2);
           newItems[index].amount = (r * q).toFixed(2);
         } else {
-          // Rate excludes GST - add GST on top
           const baseRate = r;
           newItems[index].baseRate = baseRate.toFixed(2);
           newItems[index].cgst = (baseRate * CGST_RATE * q).toFixed(2);
@@ -83,7 +83,6 @@ export default function BillsView({ businessId }: { businessId: string }) {
           newItems[index].amount = (baseRate * (1 + GST_RATE) * q).toFixed(2);
         }
       } else {
-        // Non-GST bill
         newItems[index].baseRate = r.toFixed(2);
         newItems[index].cgst = '0';
         newItems[index].sgst = '0';
@@ -95,7 +94,7 @@ export default function BillsView({ businessId }: { businessId: string }) {
 
   const addItem = () => setItems([...items, {
     description: '', quantity: '1', rate: '0', amount: '0',
-    itemName: '', taxMode: billType === 'gst' ? 'excl' : 'excl', cgst: '0', sgst: '0', baseRate: '0',
+    itemName: '', taxMode: 'excl', cgst: '0', sgst: '0', baseRate: '0',
   }]);
   const removeItem = (i: number) => { if (items.length > 1) setItems(items.filter((_, idx) => idx !== i)); };
 
@@ -109,14 +108,38 @@ export default function BillsView({ businessId }: { businessId: string }) {
     : items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0) - discountAmt;
 
   const handleSubmit = async () => {
-    if (!form.clientId || !form.billNumber || !form.dueDate) return;
+    let clientId = form.clientId;
+
+    // If new client, create client first
+    if (clientMode === 'new') {
+      if (!form.newClientName || !form.newClientPhone) return;
+      try {
+        const cRes = await fetch('/api/clients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            businessId,
+            name: form.newClientName,
+            phone: form.newClientPhone,
+            address: form.newClientAddress || null,
+            email: form.newClientEmail || null,
+            company: form.newClientCompany || null,
+          }),
+        });
+        const newClient = await cRes.json();
+        clientId = newClient.id;
+      } catch (err) { console.error(err); return; }
+    }
+
+    if (!clientId || !form.billNumber || !form.dueDate) return;
+
     try {
       await fetch('/api/bills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           businessId,
-          clientId: form.clientId,
+          clientId,
           billNumber: form.billNumber,
           date: form.date,
           dueDate: form.dueDate,
@@ -148,9 +171,14 @@ export default function BillsView({ businessId }: { businessId: string }) {
   };
 
   const resetForm = () => {
-    setForm({ clientId: '', billNumber: '', date: new Date().toISOString().split('T')[0], dueDate: '', discount: '0', notes: '', clientGst: '', clientAddress: '' });
+    setForm({
+      clientId: '', billNumber: '', date: new Date().toISOString().split('T')[0],
+      dueDate: '', discount: '0', notes: '', clientGst: '', clientAddress: '',
+      newClientName: '', newClientPhone: '', newClientAddress: '', newClientEmail: '', newClientCompany: '',
+    });
     setItems([{ description: '', quantity: '1', rate: '0', amount: '0', itemName: '', taxMode: 'excl', cgst: '0', sgst: '0', baseRate: '0' }]);
     setBillType('non_gst');
+    setClientMode('existing');
   };
 
   const handleDelete = async (id: string) => {
@@ -168,7 +196,6 @@ export default function BillsView({ businessId }: { businessId: string }) {
     return `${String(num).padStart(3, '0')}`;
   };
 
-  // When bill type changes, recalculate all items
   const handleBillTypeChange = (type: 'gst' | 'non_gst') => {
     setBillType(type);
     const newItems = items.map(item => {
@@ -184,20 +211,20 @@ export default function BillsView({ businessId }: { businessId: string }) {
           amount: item.taxMode === 'incl' ? (r * q).toFixed(2) : (baseRate * (1 + GST_RATE) * q).toFixed(2),
         };
       } else {
-        return {
-          ...item,
-          baseRate: r.toFixed(2),
-          cgst: '0',
-          sgst: '0',
-          amount: (q * r).toFixed(2),
-        };
+        return { ...item, baseRate: r.toFixed(2), cgst: '0', sgst: '0', amount: (q * r).toFixed(2) };
       }
     });
     setItems(newItems);
   };
 
+  // When existing client selected, auto-fill address
+  const handleClientSelect = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    setForm({ ...form, clientId, clientAddress: client?.address || '' });
+  };
+
   return (
-    <div className="p-4 md:p-6 space-y-4">
+    <div className="p-3 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Bills</h2>
@@ -205,120 +232,177 @@ export default function BillsView({ businessId }: { businessId: string }) {
         </div>
         <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
           <DialogTrigger asChild>
-            <Button className="gap-1.5 bg-blue-600 hover:bg-blue-700" onClick={() => setForm(f => ({ ...f, billNumber: nextBillNum() }))}>
+            <Button className="gap-1.5 bg-blue-600 hover:bg-blue-700 min-h-[44px]" onClick={() => setForm(f => ({ ...f, billNumber: nextBillNum() }))}>
               <Plus className="h-4 w-4" /> New Bill
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Create New Bill</DialogTitle></DialogHeader>
             <div className="space-y-4 pt-2">
-              {/* Bill Type Selection */}
+              {/* Step 1: Bill Type */}
               <div>
-                <Label className="text-sm font-semibold mb-2 block">Bill Type</Label>
+                <Label className="text-sm font-semibold mb-2 block">Step 1: Bill Type</Label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => handleBillTypeChange('gst')}
-                    className={`p-4 rounded-xl border-2 transition-all text-center ${
+                    className={`p-4 rounded-xl border-2 transition-all text-center min-h-[80px] ${
                       billType === 'gst'
                         ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-600'
                         : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
                     }`}
                   >
-                    <FileCheck className="h-6 w-6 mx-auto mb-2" />
+                    <FileCheck className="h-6 w-6 mx-auto mb-1" />
                     <p className="font-bold text-sm">GST Bill</p>
-                    <p className="text-xs mt-1">With CGST/SGST (18%)</p>
+                    <p className="text-[11px] mt-0.5">CGST + SGST (18%)</p>
                   </button>
                   <button
                     type="button"
                     onClick={() => handleBillTypeChange('non_gst')}
-                    className={`p-4 rounded-xl border-2 transition-all text-center ${
+                    className={`p-4 rounded-xl border-2 transition-all text-center min-h-[80px] ${
                       billType === 'non_gst'
                         ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-600'
                         : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
                     }`}
                   >
-                    <FileMinus className="h-6 w-6 mx-auto mb-2" />
+                    <FileMinus className="h-6 w-6 mx-auto mb-1" />
                     <p className="font-bold text-sm">Non-GST Bill</p>
-                    <p className="text-xs mt-1">Without GST</p>
+                    <p className="text-[11px] mt-0.5">Without GST</p>
                   </button>
                 </div>
               </div>
 
-              {/* Client Info */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Client *</Label>
-                  <Select value={form.clientId} onValueChange={(v) => {
-                    const client = clients.find(c => c.id === v);
-                    setForm({ ...form, clientId: v, clientAddress: client?.address || '', clientGst: '' });
-                  }}>
-                    <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
-                    <SelectContent>
-                      {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}{c.company ? ` (${c.company})` : ''}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+              {/* Step 2: Client Selection */}
+              <div>
+                <Label className="text-sm font-semibold mb-2 block">Step 2: Client</Label>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setClientMode('existing')}
+                    className={`p-3 rounded-xl border-2 transition-all text-center min-h-[64px] ${
+                      clientMode === 'existing'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-600'
+                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
+                    }`}
+                  >
+                    <UserCheck className="h-5 w-5 mx-auto mb-1" />
+                    <p className="font-semibold text-xs">Existing Client</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setClientMode('new')}
+                    className={`p-3 rounded-xl border-2 transition-all text-center min-h-[64px] ${
+                      clientMode === 'new'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-600'
+                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
+                    }`}
+                  >
+                    <UserPlus className="h-5 w-5 mx-auto mb-1" />
+                    <p className="font-semibold text-xs">New Client</p>
+                  </button>
                 </div>
-                <div><Label>Bill # *</Label><Input value={form.billNumber} onChange={(e) => setForm({ ...form, billNumber: e.target.value })} /></div>
+
+                {clientMode === 'existing' ? (
+                  <div className="space-y-3">
+                    <Select value={form.clientId} onValueChange={handleClientSelect}>
+                      <SelectTrigger className="min-h-[44px]"><SelectValue placeholder="Select existing client..." /></SelectTrigger>
+                      <SelectContent>
+                        {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}{c.company ? ` (${c.company})` : ''} - {c.phone}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {form.clientId && (() => {
+                      const sel = clients.find(c => c.id === form.clientId);
+                      return sel ? (
+                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs space-y-1">
+                          <p><span className="text-gray-500">Name:</span> <span className="font-medium">{sel.name}</span></p>
+                          <p><span className="text-gray-500">Phone:</span> {sel.phone}</p>
+                          {sel.address && <p><span className="text-gray-500">Address:</span> {sel.address}</p>}
+                          {sel.email && <p><span className="text-gray-500">Email:</span> {sel.email}</p>}
+                          {sel.company && <p><span className="text-gray-500">Company:</span> {sel.company}</p>}
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                ) : (
+                  <div className="space-y-3 p-3 bg-blue-50/50 dark:bg-blue-950/30 rounded-lg border border-blue-100 dark:border-blue-800">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-xs">Client Name *</Label>
+                        <Input placeholder="Full name" value={form.newClientName} onChange={(e) => setForm({ ...form, newClientName: e.target.value })} className="min-h-[44px]" />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Phone Number *</Label>
+                        <Input placeholder="Phone" value={form.newClientPhone} onChange={(e) => setForm({ ...form, newClientPhone: e.target.value })} className="min-h-[44px]" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-xs">Address</Label>
+                        <Input placeholder="Address" value={form.newClientAddress} onChange={(e) => setForm({ ...form, newClientAddress: e.target.value, clientAddress: e.target.value })} className="min-h-[44px]" />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Email</Label>
+                        <Input placeholder="Email" value={form.newClientEmail} onChange={(e) => setForm({ ...form, newClientEmail: e.target.value })} className="min-h-[44px]" />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Company</Label>
+                      <Input placeholder="Company name" value={form.newClientCompany} onChange={(e) => setForm({ ...form, newClientCompany: e.target.value })} className="min-h-[44px]" />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* GST-specific fields */}
               {billType === 'gst' && (
                 <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
                   <div>
-                    <Label>Client GSTIN</Label>
-                    <Input
-                      value={form.clientGst}
-                      onChange={(e) => setForm({ ...form, clientGst: e.target.value.toUpperCase() })}
-                      placeholder="e.g. 19XXXXX1234F1ZG"
-                      className="uppercase"
-                    />
+                    <Label className="text-xs">Client GSTIN</Label>
+                    <Input value={form.clientGst} onChange={(e) => setForm({ ...form, clientGst: e.target.value.toUpperCase() })} placeholder="e.g. 19XXXXX1234F1ZG" className="uppercase min-h-[44px]" />
                   </div>
                   <div>
-                    <Label>Client Address</Label>
-                    <Input
-                      value={form.clientAddress}
-                      onChange={(e) => setForm({ ...form, clientAddress: e.target.value })}
-                      placeholder="Client billing address"
-                    />
+                    <Label className="text-xs">Billing Address</Label>
+                    <Input value={form.clientAddress} onChange={(e) => setForm({ ...form, clientAddress: e.target.value })} placeholder="Billing address" className="min-h-[44px]" />
                   </div>
                 </div>
               )}
 
+              {/* Bill Details */}
               <div className="grid grid-cols-3 gap-3">
-                <div><Label>Date</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
-                <div><Label>Due Date *</Label><Input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></div>
-                <div><Label>Discount (₹)</Label><Input type="number" value={form.discount} onChange={(e) => setForm({ ...form, discount: e.target.value })} /></div>
+                <div><Label className="text-xs">Bill # *</Label><Input value={form.billNumber} onChange={(e) => setForm({ ...form, billNumber: e.target.value })} className="min-h-[44px]" /></div>
+                <div><Label className="text-xs">Date</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="min-h-[44px]" /></div>
+                <div><Label className="text-xs">Due Date *</Label><Input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className="min-h-[44px]" /></div>
               </div>
 
               {/* Items */}
               <div>
-                <Label className="text-sm font-semibold">Items</Label>
+                <Label className="text-sm font-semibold">Step 3: Items</Label>
                 <div className="space-y-2 mt-2">
                   {items.map((item, i) => (
-                    <div key={i} className={`p-3 rounded-lg border ${billType === 'gst' ? 'border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50'}`}>
-                      <div className="grid grid-cols-12 gap-2 items-end">
-                        <div className="col-span-2">
+                    <div key={i} className={`p-3 rounded-lg border ${billType === 'gst' ? 'border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50'}`}>
+                      {/* Mobile: stack layout, Desktop: grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end">
+                        <div className="col-span-2 md:col-span-2">
                           <Label className="text-[10px]">Item Name</Label>
-                          <Input placeholder="Item" value={item.itemName} onChange={(e) => updateItem(i, 'itemName', e.target.value)} className="h-8 text-xs" />
+                          <Input placeholder="Item" value={item.itemName} onChange={(e) => updateItem(i, 'itemName', e.target.value)} className="h-10 text-sm" />
                         </div>
-                        <div className="col-span-3">
+                        <div className="col-span-2 md:col-span-3">
                           <Label className="text-[10px]">Description</Label>
-                          <Input placeholder="Description" value={item.description} onChange={(e) => updateItem(i, 'description', e.target.value)} className="h-8 text-xs" />
+                          <Input placeholder="Description" value={item.description} onChange={(e) => updateItem(i, 'description', e.target.value)} className="h-10 text-sm" />
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-1 md:col-span-2">
                           <Label className="text-[10px]">Rate (₹)</Label>
-                          <Input type="number" step="0.01" placeholder="Rate" value={item.rate} onChange={(e) => updateItem(i, 'rate', e.target.value)} className="h-8 text-xs" />
+                          <Input type="number" step="0.01" placeholder="Rate" value={item.rate} onChange={(e) => updateItem(i, 'rate', e.target.value)} className="h-10 text-sm" />
                         </div>
-                        <div className="col-span-1">
+                        <div className="col-span-1 md:col-span-1">
                           <Label className="text-[10px]">Qty</Label>
-                          <Input type="number" placeholder="Qty" value={item.quantity} onChange={(e) => updateItem(i, 'quantity', e.target.value)} className="h-8 text-xs" />
+                          <Input type="number" placeholder="Qty" value={item.quantity} onChange={(e) => updateItem(i, 'quantity', e.target.value)} className="h-10 text-sm" />
                         </div>
                         {billType === 'gst' && (
-                          <div className="col-span-2">
+                          <div className="col-span-2 md:col-span-2">
                             <Label className="text-[10px]">Tax Mode</Label>
                             <Select value={item.taxMode} onValueChange={(v) => updateItem(i, 'taxMode', v)}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="excl">Excl. GST</SelectItem>
                                 <SelectItem value="incl">Incl. GST</SelectItem>
@@ -326,18 +410,18 @@ export default function BillsView({ businessId }: { businessId: string }) {
                             </Select>
                           </div>
                         )}
-                        <div className="col-span-1">
+                        <div className="col-span-1 md:col-span-1">
                           <Label className="text-[10px]">Total</Label>
-                          <Input readOnly value={item.amount} className="h-8 text-xs bg-white dark:bg-gray-900" />
+                          <Input readOnly value={item.amount} className="h-10 text-sm bg-white dark:bg-gray-900" />
                         </div>
-                        <div className="col-span-1">
-                          <Button variant="ghost" size="icon" onClick={() => removeItem(i)} className="h-8 w-8">
-                            <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                        <div className="col-span-1 md:col-span-1 flex items-end">
+                          <Button variant="ghost" size="icon" onClick={() => removeItem(i)} className="h-10 w-10 min-w-[44px]">
+                            <Trash2 className="h-4 w-4 text-red-400" />
                           </Button>
                         </div>
                       </div>
                       {billType === 'gst' && parseFloat(item.rate) > 0 && (
-                        <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-400 flex gap-3">
+                        <div className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 flex gap-3">
                           <span>Base: ₹{parseFloat(item.baseRate).toFixed(2)}</span>
                           <span>CGST: ₹{item.cgst}</span>
                           <span>SGST: ₹{item.sgst}</span>
@@ -346,12 +430,12 @@ export default function BillsView({ businessId }: { businessId: string }) {
                     </div>
                   ))}
                 </div>
-                <Button variant="outline" size="sm" onClick={addItem} className="mt-2 gap-1"><Plus className="h-3 w-3" /> Add Item</Button>
+                <Button variant="outline" size="sm" onClick={addItem} className="mt-2 gap-1 min-h-[40px]"><Plus className="h-3 w-3" /> Add Item</Button>
               </div>
 
-              <div>
-                <Label>Notes</Label>
-                <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Additional notes..." />
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label className="text-xs">Discount (₹)</Label><Input type="number" value={form.discount} onChange={(e) => setForm({ ...form, discount: e.target.value })} className="min-h-[44px]" /></div>
+                <div><Label className="text-xs">Notes</Label><Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Notes..." className="min-h-[44px]" /></div>
               </div>
 
               {/* Summary */}
@@ -373,7 +457,8 @@ export default function BillsView({ businessId }: { businessId: string }) {
                 )}
               </div>
 
-              <Button onClick={handleSubmit} className="w-full bg-blue-600 hover:bg-blue-700" disabled={!form.clientId || !form.billNumber || !form.dueDate}>
+              <Button onClick={handleSubmit} className="w-full bg-blue-600 hover:bg-blue-700 min-h-[48px] text-base font-semibold"
+                disabled={!form.billNumber || !form.dueDate || (clientMode === 'existing' ? !form.clientId : !form.newClientName || !form.newClientPhone)}>
                 {billType === 'gst' ? 'Create GST Invoice' : 'Create Bill'}
               </Button>
             </div>
@@ -389,39 +474,32 @@ export default function BillsView({ businessId }: { businessId: string }) {
       ) : (
         <div className="space-y-2">
           {bills.map((bill) => (
-            <Card key={bill.id} className="p-4 hover:shadow-md transition-shadow">
+            <Card key={bill.id} className="p-4 hover:shadow-md transition-shadow active:scale-[0.98]">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${
                     bill.billType === 'gst' ? 'bg-blue-50 dark:bg-blue-950' : 'bg-gray-50 dark:bg-gray-800'
                   }`}>
                     <FileText className={`h-5 w-5 ${bill.billType === 'gst' ? 'text-blue-500' : 'text-gray-500'}`} />
                   </div>
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-gray-100">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">
                       {bill.billNumber}
-                      {bill.billType === 'gst' && (
-                        <Badge className="ml-2 text-[9px] bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">GST</Badge>
-                      )}
+                      {bill.billType === 'gst' && <Badge className="ml-2 text-[9px] bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">GST</Badge>}
                     </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{bill.client.name} • {new Date(bill.date).toLocaleDateString('en-IN')}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{bill.client.name} • {new Date(bill.date).toLocaleDateString('en-IN')}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 shrink-0">
                   <div className="text-right">
                     <p className="font-bold text-gray-900 dark:text-gray-100">{fmt(bill.total)}</p>
                     <Badge className={`text-[10px] ${statusColor(bill.status)}`}>
                       {bill.status === 'paid' ? 'Paid' : bill.status === 'partial' ? 'Partial' : 'Unpaid'}
                     </Badge>
                   </div>
-                  <div className="flex gap-1">
-                    <button onClick={() => setViewBill(bill)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded">
-                      <Eye className="h-4 w-4 text-gray-400" />
-                    </button>
-                    <button onClick={() => handleDelete(bill.id)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950 rounded">
-                      <Trash2 className="h-4 w-4 text-gray-400" />
-                    </button>
-                  </div>
+                  <button onClick={() => setViewBill(bill)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg min-w-[44px] min-h-[44px] flex items-center justify-center">
+                    <Eye className="h-4 w-4 text-gray-400" />
+                  </button>
                 </div>
               </div>
             </Card>
@@ -429,10 +507,7 @@ export default function BillsView({ businessId }: { businessId: string }) {
         </div>
       )}
 
-      {/* Invoice Preview */}
-      {viewBill && (
-        <InvoicePreview bill={viewBill} onClose={() => setViewBill(null)} />
-      )}
+      {viewBill && <InvoicePreview bill={viewBill} onClose={() => setViewBill(null)} />}
     </div>
   );
 }

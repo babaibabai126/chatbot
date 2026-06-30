@@ -4,62 +4,95 @@ import { db } from '@/lib/db';
 const BUSINESS_KNOWLEDGE = `
 You are the AI assistant for "AAROHAN BUSINESS HUB" - a multi-business management platform. You help the business owner manage their businesses.
 
-ব্যবসার তথ্য / Business Details:
+Business Details:
 
 1. AAROHAN TECH SOLUTIONS (Marketing Agency)
    - Services: Digital Marketing, SEO, Social Media Management, Branding, Content Creation, Graphic Design
-   - সেবা: ডিজিটাল মার্কেটিং, SEO, সোশ্যাল মিডিয়া ম্যানেজমেন্ট, ব্র্যান্ডিং, কনটেন্ট ক্রিয়েশন, গ্রাফিক ডিজাইন
+   - GST NO: 19MKIPS8902F1ZG
+   - Address: 24/27 A.K.M ROAD, BARANAGAR, KOLKATA - 700090
+   - Contact: 6290717007 | contact@aarohantechsolutions.in
+   - Bank: SAMATA CO-OPERATIVE BANK, ACC: 003105000000153, IFSC: HDFC0CSAMAT
 
 2. ASTRONAUT STIKERZ (Notebook & Mousepad)
    - Products: Custom Notebooks, Mousepads, Stickers
-   - পণ্য: কাস্টম নোটবুক, মাউসপ্যাড, স্টিকার
 
 3. AAROHAN WEB ACADEMY (Institute)
    - Courses: Web Development, Digital Marketing, Graphic Design
-   - কোর্স: ওয়েব ডেভেলপমেন্ট, ডিজিটাল মার্কেটিং, গ্রাফিক ডিজাইন
 
-Your capabilities:
-- Help create bills/invoices for clients
-- Help create quotations
-- Add expenses to the expense list
-- Manage client information
-- Track payments and dues
-- Provide business summaries and reports
+IMPORTANT - You can perform actions! When user asks to create something, respond with action JSON:
+{{"action": "create_bill", "data": {"clientId": "id", "billNumber": "001", "billType": "gst", "items": [...]}}}
+{{"action": "create_client", "data": {"name": "...", "phone": "..."}}}
+{{"action": "create_expense", "data": {"category": "...", "amount": 5000}}}
 
 Rules:
-1. Always respond in Bengali + English (bilingual)
-2. Be helpful, professional, and concise
-3. When asked to create a bill/quotation/expense, guide the user step by step
-4. Use proper formatting with clear sections
-5. For financial amounts, always show in BDT (৳)
-6. If the user asks you to do something (create bill, add expense etc.), confirm the details before creating
-7. Help with calculations when needed
+1. Respond in Bengali + English (bilingual)
+2. For financial amounts use ₹ (INR)
+3. GST: CGST 9% + SGST 9% = 18%
+4. Be helpful and professional
 `;
 
-// In-memory conversation store (works per-serverless-instance)
 const conversations = new Map<string, Array<{ role: string; content: string }>>();
 
-// Lazy-load ZAI SDK (only on server)
+// --- Provider 1: Gemini API ---
+async function callGemini(messages: Array<{ role: string; content: string }>): Promise<string | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const contents = messages
+      .filter(m => m.role !== 'system' && m.role !== 'assistant' || m === messages[0])
+      .map(m => ({
+        role: m.role === 'assistant' && m !== messages[0] ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      }));
+
+    const systemInstruction = messages[0]?.content || '';
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    clearTimeout(timeout);
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+  } catch {
+    return null;
+  }
+}
+
+// --- Provider 2: ZAI SDK ---
 let zaiInstance: any = null;
 let zaiInitPromise: Promise<any> | null = null;
 
 async function getZAI(): Promise<any> {
   if (zaiInstance) return zaiInstance;
   if (zaiInitPromise) return zaiInitPromise;
-
   zaiInitPromise = (async () => {
     try {
       const ZAI = (await import('z-ai-web-dev-sdk')).default;
       zaiInstance = await ZAI.create();
-      console.log('[Chat] ZAI SDK initialized successfully');
       return zaiInstance;
-    } catch (err) {
-      console.error('[Chat] ZAI SDK init failed:', err);
+    } catch {
       zaiInitPromise = null;
       return null;
     }
   })();
-
   return zaiInitPromise;
 }
 
@@ -67,109 +100,139 @@ async function callZAI(messages: Array<{ role: string; content: string }>): Prom
   try {
     const zai = await getZAI();
     if (!zai) return null;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-
     const response = await zai.chat.completions.create({
       messages,
       thinking: { type: 'disabled' },
     });
-
-    clearTimeout(timeout);
-
-    const content = response?.choices?.[0]?.message?.content;
-    if (!content || content.trim().length === 0) {
-      console.warn('[Chat] ZAI returned empty response');
-      return null;
-    }
-
-    return content;
-  } catch (err) {
-    console.error('[Chat] ZAI API call failed:', err);
+    return response?.choices?.[0]?.message?.content || null;
+  } catch {
     return null;
   }
 }
 
-// Smart fallback when ZAI API is unavailable
-function generateSmartResponse(message: string, dbContext: string): string {
+// --- Provider 3: Smart Fallback ---
+function generateSmartResponse(message: string): string {
   const lower = message.toLowerCase();
 
-  // Greeting
   if (lower.match(/হ্যালো|হ্যাই|hello|hi|hey|নমস্কার|কেমন আছ/)) {
-    return `নমস্কার! / Hello! 👋\n\nআমি AAROHAN Business Hub এর AI সহকারী। আমি আপনাকে সাহায্য করতে পারি:\n\n• বিল তৈরি / Create bills\n• কোটেশন তৈরি / Create quotations\n• খরচ যোগ / Add expenses\n• ক্লায়েন্ট ম্যানেজ / Manage clients\n• বকেয়া দেখুন / Check dues\n• পেমেন্ট ট্র্যাক / Track payments\n\nকী সাহায্য চান? / How can I help?`;
+    return `নমস্কার! / Hello! 👋\n\nআমি AAROHAN Business Hub এর AI সহকারী। আমি আপনাকে সাহায্য করতে পারি:\n\n• বিল তৈরি / Create bills (GST & Non-GST)\n• ক্লায়েন্ট যোগ / Add clients\n• খরচ রেকর্ড / Record expenses\n• বকেয়া দেখুন / Check dues\n• পেমেন্ট ট্র্যাক / Track payments\n\nকী সাহায্য চান? / How can I help?`;
   }
-
-  // Bill related
-  if (lower.match(/বিল|bill|invoice|চালান/)) {
-    return `📄 **বিল তৈরি / Create Bill**\n\nবিল তৈরি করতে:\n1. বাম মেনু থেকে **Bills** এ ক্লিক করুন\n2. **নতুন বিল** বাটনে ক্লিক করুন\n3. ক্লায়েন্ট সিলেক্ট করুন\n4. আইটেম যোগ করুন (বিবরণ, পরিমাণ, দাম)\n5. ট্যাক্স ও ডিসকাউন্ট যোগ করুন\n6. **সেভ** ক্লিক করুন\n\nবিল অটো-নম্বরিং হবে (BILL-0001, BILL-0002...)\n\nTo create a bill, go to Bills → New Bill → fill details → Save`;
+  if (lower.match(/বিল|bill|invoice/)) {
+    return `📄 **বিল তৈরি / Create Bill**\n\n1. Bills → New Bill ক্লিক করুন\n2. GST / Non-GST সিলেক্ট করুন\n3. Existing / New Client সিলেক্ট করুন\n4. আইটেম যোগ করুন\n5. সেভ করুন → Invoice Preview → Print`;
   }
-
-  // Quotation related
-  if (lower.match(/কোটেশন|quotation|quote|প্রস্তাব/)) {
-    return `📋 **কোটেশন তৈরি / Create Quotation**\n\nকোটেশন তৈরি করতে:\n1. **Quotations** মেনুতে যান\n2. **নতুন কোটেশন** ক্লিক করুন\n3. ক্লায়েন্ট ও আইটেম যোগ করুন\n4. Valid Until তারিখ দিন\n5. সেভ করুন\n\nস্ট্যাটাস: Draft → Sent → Accepted/Rejected\n\nQuotations → New → fill details → set validity → Save`;
+  if (lower.match(/খরচ|expense/)) {
+    return `💰 **খরচ যোগ / Add Expense**\n\nExpenses মেনুতে যান → নতুন খরচ ক্লিক → ক্যাটাগরি ও পরিমাণ দিন → সেভ`;
   }
-
-  // Expense related
-  if (lower.match(/খরচ|expense|cost|খরচা/)) {
-    return `💰 **খরচ যোগ / Add Expense**\n\nখরচ যোগ করতে:\n1. **Expenses** মেনুতে যান\n2. **নতুন খরচ** ক্লিক করুন\n3. ক্যাটাগরি সিলেক্ট করুন:\n   - Office Rent / অফিস ভাড়া\n   - Salary / বেতন\n   - Internet / ইন্টারনেট\n   - Software / সফটওয়্যার\n   - Marketing / মার্কেটিং\n   - Travel / ট্রাভেল\n   - Food / খাবার\n   - Equipment / সরঞ্জাম\n   - Utilities / ইউটিলিটি\n   - Miscellaneous / বিবিধ\n4. পরিমাণ ও পেমেন্ট মেথড দিন\n5. সেভ করুন`;
+  if (lower.match(/ক্লায়েন্ট|client/)) {
+    return `👥 **ক্লায়েন্ট / Clients**\n\nClients মেনুতে যান → নতুন ক্লায়েন্ট ক্লিক → তথ্য দিন → সেভ`;
   }
+  return `🙏 আমি AAROHAN Business Hub এর AI সহকারী।\n\n• 📄 বিল তৈরি / Create Bill\n• 👥 ক্লায়েন্ট যোগ / Add Client\n• 💰 খরচ রেকর্ড / Record Expense\n• ⚠️ বকেয়া দেখুন / Check Dues\n\nকী বিষয়ে জানতে চান?`;
+}
 
-  // Dues related
-  if (lower.match(/বকেয়া|due|owe|বাকি|pending|unpaid/)) {
-    return `⚠️ **বকেয়া / Upcoming Dues**\n\nবকেয়া দেখতে:\n1. **Dues** মেনুতে যান\n2. সেখানে দেখবেন:\n   - 🔴 মেয়াদোত্তীর্ণ বকেয়া / Overdue\n   - 🟡 আসন্ন বকেয়া / Upcoming\n   - মোট বকেয়ার পরিমাণ\n   - ক্লায়েন্টের কন্টাক্ট তথ্য\n\nDues → check overdue & upcoming → follow up with clients`;
+// Execute actions
+async function executeAction(action: string, data: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown }> {
+  try {
+    if (action === 'create_client') {
+      const client = await db.client.create({
+        data: {
+          businessId,
+          name: String(data.name || ''),
+          phone: String(data.phone || ''),
+          address: data.address ? String(data.address) : null,
+          email: data.email ? String(data.email) : null,
+          company: data.company ? String(data.company) : null,
+        },
+      });
+      return { success: true, result: client };
+    }
+
+    if (action === 'create_bill') {
+      const items = (data.items as Array<Record<string, unknown>>) || [];
+      const billType = String(data.billType || 'non_gst');
+      const GST_RATE = 0.18;
+      let subtotal = 0;
+      let totalGst = 0;
+
+      const processedItems = items.map((item) => {
+        const rate = Number(item.rate) || 0;
+        const qty = Number(item.quantity) || 1;
+        const taxMode = String(item.taxMode || 'excl');
+        const baseRate = taxMode === 'incl' ? rate / (1 + GST_RATE) : rate;
+        const itemGst = baseRate * GST_RATE * qty;
+        const amount = taxMode === 'incl' ? rate * qty : baseRate * (1 + GST_RATE) * qty;
+        subtotal += baseRate * qty;
+        totalGst += itemGst;
+        return {
+          description: String(item.description || item.itemName || ''),
+          quantity: qty, rate, amount,
+          itemName: String(item.itemName || ''),
+          taxMode,
+          cgst: billType === 'gst' ? baseRate * 0.09 * qty : 0,
+          sgst: billType === 'gst' ? baseRate * 0.09 * qty : 0,
+          baseRate,
+        };
+      });
+
+      const total = subtotal + totalGst;
+      const bill = await db.bill.create({
+        data: {
+          businessId,
+          clientId: String(data.clientId || ''),
+          billNumber: String(data.billNumber || `ATS/${new Date().getFullYear().toString().slice(2)}-${String(new Date().getMonth() + 1).padStart(2, '0')}/${String(Math.floor(Math.random() * 900) + 100)}`),
+          date: new Date(String(data.date || new Date().toISOString().split('T')[0])),
+          dueDate: new Date(String(data.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])),
+          subtotal, tax: totalGst, discount: 0, total,
+          billType,
+          clientGst: data.clientGst ? String(data.clientGst) : null,
+          clientAddress: data.clientAddress ? String(data.clientAddress) : null,
+          notes: data.notes ? String(data.notes) : null,
+          items: { create: processedItems },
+        },
+        include: { items: true, client: true },
+      });
+      return { success: true, result: bill };
+    }
+
+    if (action === 'create_expense') {
+      const expense = await db.expense.create({
+        data: {
+          businessId,
+          category: String(data.category || 'Miscellaneous'),
+          description: String(data.description || ''),
+          amount: Number(data.amount) || 0,
+          date: new Date(String(data.date || new Date().toISOString().split('T')[0])),
+          paymentMethod: data.paymentMethod ? String(data.paymentMethod) : null,
+        },
+      });
+      return { success: true, result: expense };
+    }
+
+    return { success: false, result: 'Unknown action' };
+  } catch (error) {
+    console.error('[Chat] Action error:', error);
+    return { success: false, result: error instanceof Error ? error.message : 'Unknown error' };
   }
-
-  // Payment related
-  if (lower.match(/পেমেন্ট|payment|pay|জমা|টাকা/)) {
-    return `💳 **পেমেন্ট / Payments**\n\nপেমেন্ট রেকর্ড করতে:\n1. **Payments** মেনুতে যান\n2. **নতুন পেমেন্ট** ক্লিক করুন\n3. ক্লায়েন্ট ও বিল সিলেক্ট করুন\n4. পরিমাণ ও মেথড দিন:\n   - Cash / নগদ\n   - bKash / বিকাশ\n   - Nagad / নগদ\n   - Bank / ব্যাংক\n5. রসিদ নম্বর দিন\n6. সেভ করুন\n\nবিলের paid amount অটো-আপডেট হবে!`;
-  }
-
-  // Client related
-  if (lower.match(/ক্লায়েন্ট|client|customer|গ্রাহক/)) {
-    return `👥 **ক্লায়েন্ট / Clients**\n\nক্লায়েন্ট যোগ করতে:\n1. **Clients** মেনুতে যান\n2. **নতুন ক্লায়েন্ট** ক্লিক করুন\n3. তথ্য দিন:\n   - নাম / Name\n   - ফোন / Phone\n   - ইমেইল / Email\n   - ঠিকানা / Address\n   - কোম্পানি / Company\n   - নোট / Notes\n4. সেভ করুন\n\nপ্রতিটি ক্লায়েন্টে বিল, কোটেশন, পেমেন্ট কাউন্ট দেখাবে`;
-  }
-
-  // Dashboard / summary
-  if (lower.match(/সারাংশ|summary|dashboard|রিপোর্ট|report|overview/)) {
-    return `📊 **ড্যাশবোর্ড / Dashboard Summary**\n\nড্যাশবোর্ডে দেখবেন:\n• মোট ক্লায়েন্ট / Total Clients\n• মোট বিল / Total Bills\n• মোট কোটেশন / Total Quotations\n• মোট খরচ / Total Expenses\n• আয়-খরচ সারাংশ / Income vs Expense\n• আসন্ন বকেয়া / Upcoming Dues\n• সাম্প্রতিক কার্যক্রম / Recent Activity\n• খরচের ক্যাটাগরি ব্রেকডাউন\n\nDashboard → সব তথ্য এক নজরে!`;
-  }
-
-  // Include DB context in response if available
-  if (dbContext) {
-    return `🙏 আমি AAROHAN Business Hub এর AI সহকারী।\n\nআমি আপনাকে সাহায্য করতে পারি:\n\n• 📄 বিল তৈরি / Create Bill\n• 📋 কোটেশন তৈরি / Create Quotation\n• 💰 খরচ যোগ / Add Expense\n• 👥 ক্লায়েন্ট ম্যানেজ / Manage Clients\n• 💳 পেমেন্ট রেকর্ড / Record Payment\n• ⚠️ বকেয়া দেখুন / Check Dues\n• 📊 ড্যাশবোর্ড / Dashboard Summary\n\nকী বিষয়ে জানতে চান? / What would you like to know?`;
-  }
-
-  // Default
-  return `🙏 আমি AAROHAN Business Hub এর AI সহকারী।\n\nআমি আপনাকে সাহায্য করতে পারি:\n\n• 📄 বিল তৈরি / Create Bill\n• 📋 কোটেশন তৈরি / Create Quotation\n• 💰 খরচ যোগ / Add Expense\n• 👥 ক্লায়েন্ট ম্যানেজ / Manage Clients\n• 💳 পেমেন্ট রেকর্ড / Record Payment\n• ⚠️ বকেয়া দেখুন / Check Dues\n• 📊 ড্যাশবোর্ড / Dashboard Summary\n\nকী বিষয়ে জানতে চান? / What would you like to know?`;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const { sessionId, message, context } = await request.json();
-
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    // Build context from database if businessId provided
+    // Build DB context
     let dbContext = '';
-    if (context?.businessId) {
+    const businessId = context?.businessId;
+    if (businessId) {
       try {
         const [clients, bills, expenses] = await Promise.all([
-          db.client.findMany({ where: { businessId: context.businessId }, take: 20 }),
-          db.bill.findMany({
-            where: { businessId: context.businessId },
-            take: 20,
-            include: { client: { select: { name: true } }, items: true },
-          }),
-          db.expense.findMany({ where: { businessId: context.businessId }, take: 20 }),
+          db.client.findMany({ where: { businessId }, take: 20 }),
+          db.bill.findMany({ where: { businessId }, take: 10, include: { client: { select: { name: true } } } }),
+          db.expense.findMany({ where: { businessId }, take: 10 }),
         ]);
-
-        dbContext = `\n\nCurrent Data:\nClients: ${JSON.stringify(clients.map(c => ({ id: c.id, name: c.name, phone: c.phone, company: c.company })))}\nRecent Bills: ${JSON.stringify(bills.map(b => ({ id: b.id, billNumber: b.billNumber, client: b.client.name, total: b.total, status: b.status, items: b.items.map(i => i.description) })))}\nRecent Expenses: ${JSON.stringify(expenses.map(e => ({ id: e.id, category: e.category, description: e.description, amount: e.amount })))}`;
-      } catch {
-        // ignore db errors in chat
-      }
+        dbContext = `\n\nCurrent Data:\nClients: ${JSON.stringify(clients.map(c => ({ id: c.id, name: c.name, phone: c.phone })))}\nRecent Bills: ${JSON.stringify(bills.map(b => ({ id: b.id, billNumber: b.billNumber, client: b.client.name, total: b.total, billType: b.billType })))}\nRecent Expenses: ${JSON.stringify(expenses.map(e => ({ category: e.category, amount: e.amount })))}`;
+      } catch { /* ignore */ }
     }
 
     let history = conversations.get(sessionId);
@@ -178,36 +241,58 @@ export async function POST(request: NextRequest) {
     } else {
       history[0] = { role: 'assistant', content: BUSINESS_KNOWLEDGE + dbContext };
     }
-
     history.push({ role: 'user', content: message });
+    if (history.length > 22) history = [history[0], ...history.slice(-20)];
 
-    if (history.length > 22) {
-      history = [history[0], ...history.slice(-20)];
-    }
-
-    // Try ZAI SDK first, fallback to smart response
+    // Try providers in order: Gemini → ZAI → Smart Fallback
     let aiResponse: string | null = null;
 
-    try {
-      aiResponse = await callZAI(history);
-    } catch {
-      // ZAI SDK unavailable - use smart fallback
-    }
+    // Try Gemini first
+    aiResponse = await callGemini(history);
 
+    // Try ZAI if Gemini failed
     if (!aiResponse) {
-      aiResponse = generateSmartResponse(message, dbContext);
+      aiResponse = await callZAI(history);
     }
 
-    history.push({ role: 'assistant', content: aiResponse });
+    // Smart fallback
+    if (!aiResponse) {
+      aiResponse = generateSmartResponse(message);
+    }
+
+    // Check for action JSON in response
+    let actionResult = null;
+    const actionMatch = aiResponse.match(/\{\{"action":\s*"(\w+)",\s*"data":\s*(\{[\s\S]*?\})\}\}/);
+    if (actionMatch && businessId) {
+      try {
+        const action = actionMatch[1];
+        const data = JSON.parse(actionMatch[2]);
+        actionResult = await executeAction(action, data, businessId);
+        if (actionResult.success) {
+          const actionMsg = action === 'create_bill'
+            ? `✅ Bill created! #${(actionResult.result as Record<string, unknown>)?.billNumber || ''}`
+            : action === 'create_client'
+            ? `✅ Client added!`
+            : action === 'create_expense'
+            ? `✅ Expense recorded!`
+            : `✅ Done!`;
+          aiResponse = aiResponse.replace(actionMatch[0], '').trim() + '\n\n' + actionMsg;
+        }
+      } catch { /* action failed, still return text */ }
+    }
+
+    history.push({ role: 'user', content: aiResponse });
     conversations.set(sessionId, history);
 
-    return NextResponse.json({ success: true, response: aiResponse });
+    return NextResponse.json({
+      success: true,
+      response: aiResponse,
+      actionExecuted: actionResult?.success || false,
+      actionData: actionResult?.success ? actionResult.result : null,
+    });
   } catch (error) {
     console.error('Chat API error:', error);
-    return NextResponse.json(
-      { error: 'Failed to get response', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to get response' }, { status: 500 });
   }
 }
 
