@@ -8,6 +8,13 @@ export async function GET() {
       orderBy: { createdAt: 'asc' },
     });
 
+    // Ensure AAROHAN TECH SOLUTIONS is always first (primary business)
+    businesses.sort((a, b) => {
+      if (a.name === 'AAROHAN TECH SOLUTIONS') return -1;
+      if (b.name === 'AAROHAN TECH SOLUTIONS') return 1;
+      return 0;
+    });
+
     // Seed if empty
     if (businesses.length === 0) {
       const seeded = await Promise.all([

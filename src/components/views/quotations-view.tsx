@@ -30,7 +30,7 @@ export default function QuotationsView({ businessId }: { businessId: string }) {
   });
   const [items, setItems] = useState<QuotationItem[]>([{ description: '', quantity: '1', rate: '0', amount: '0' }]);
 
-  const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 0 })}`;
+  const fmt = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
   const fetchData = useCallback(async () => {
     try {
@@ -181,7 +181,7 @@ export default function QuotationsView({ businessId }: { businessId: string }) {
                   <div className="h-10 w-10 rounded-lg bg-purple-50 flex items-center justify-center"><Receipt className="h-5 w-5 text-purple-500" /></div>
                   <div>
                     <p className="font-semibold text-gray-900">{q.quotationNumber}</p>
-                    <p className="text-xs text-gray-500">{q.client.name} • Valid until: {new Date(q.validUntil).toLocaleDateString('en-BD')}</p>
+                    <p className="text-xs text-gray-500">{q.client.name} • Valid until: {new Date(q.validUntil).toLocaleDateString('en-IN')}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">

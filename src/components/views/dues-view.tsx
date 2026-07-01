@@ -15,7 +15,7 @@ export default function DuesView({ businessId }: { businessId: string }) {
   const [dueBills, setDueBills] = useState<DueBill[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 0 })}`;
+  const fmt = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
   const fetchData = useCallback(async () => {
     try {
@@ -67,7 +67,7 @@ export default function DuesView({ businessId }: { businessId: string }) {
                     <div className="h-10 w-10 rounded-lg bg-red-100 flex items-center justify-center"><AlertCircle className="h-5 w-5 text-red-500" /></div>
                     <div>
                       <p className="font-semibold text-gray-900">{b.client.name}</p>
-                      <p className="text-xs text-gray-500">{b.billNumber} • মেয়াদ: {new Date(b.dueDate).toLocaleDateString('en-BD')}</p>
+                      <p className="text-xs text-gray-500">{b.billNumber} • মেয়াদ: {new Date(b.dueDate).toLocaleDateString('en-IN')}</p>
                       {b.client.phone && <p className="text-xs text-gray-400">ফোন: {b.client.phone}</p>}
                     </div>
                   </div>
@@ -96,7 +96,7 @@ export default function DuesView({ businessId }: { businessId: string }) {
                     <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center"><AlertCircle className="h-5 w-5 text-amber-500" /></div>
                     <div>
                       <p className="font-semibold text-gray-900">{b.client.name}</p>
-                      <p className="text-xs text-gray-500">{b.billNumber} • শেষ তারিখ: {new Date(b.dueDate).toLocaleDateString('en-BD')}</p>
+                      <p className="text-xs text-gray-500">{b.billNumber} • শেষ তারিখ: {new Date(b.dueDate).toLocaleDateString('en-IN')}</p>
                       {b.client.phone && <p className="text-xs text-gray-400">ফোন: {b.client.phone}</p>}
                     </div>
                   </div>

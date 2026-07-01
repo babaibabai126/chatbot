@@ -30,7 +30,7 @@ export default function PaymentsView({ businessId }: { businessId: string }) {
     paymentMethod: 'Cash', receiptNumber: '', notes: '',
   });
 
-  const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 0 })}`;
+  const fmt = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
   const fetchData = useCallback(async () => {
     try {
@@ -128,10 +128,9 @@ export default function PaymentsView({ businessId }: { businessId: string }) {
                   <Select value={form.paymentMethod} onValueChange={(v) => setForm({ ...form, paymentMethod: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Cash">ক্যাশ / Cash</SelectItem>
-                      <SelectItem value="bKash">বিকাশ / bKash</SelectItem>
-                      <SelectItem value="Nagad">নগদ / Nagad</SelectItem>
-                      <SelectItem value="Bank Transfer">ব্যাংক / Bank</SelectItem>
+                      <SelectItem value="Cash">Cash</SelectItem>
+                      <SelectItem value="UPI">UPI</SelectItem>
+                      <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -155,7 +154,7 @@ export default function PaymentsView({ businessId }: { businessId: string }) {
                   <div>
                     <p className="font-medium text-gray-900">{p.client.name}</p>
                     <p className="text-xs text-gray-500">
-                      {p.receiptNumber} • {p.paymentMethod} • {new Date(p.date).toLocaleDateString('en-BD')}
+                      {p.receiptNumber} • {p.paymentMethod} • {new Date(p.date).toLocaleDateString('en-IN')}
                       {p.bill && ` • ${p.bill.billNumber}`}
                     </p>
                   </div>

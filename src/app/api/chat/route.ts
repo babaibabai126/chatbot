@@ -143,10 +143,10 @@ function detectIntent(message: string): DetectedIntent | null {
     }
     if (!args.category) args.category = 'Miscellaneous';
 
-    if (lower.includes('cash') || lower.includes('ক্যাশ')) args.paymentMethod = 'Cash';
-    else if (lower.includes('bkash') || lower.includes('বিকাশ')) args.paymentMethod = 'bKash';
+    if (lower.includes('upi') || lower.includes('গুগল পে') || lower.includes('phonepe')) args.paymentMethod = 'UPI';
     else if (lower.includes('bank') || lower.includes('ব্যাংক')) args.paymentMethod = 'Bank Transfer';
-    else if (lower.includes('upi')) args.paymentMethod = 'UPI';
+    else if (lower.includes('cash') || lower.includes('ক্যাশ')) args.paymentMethod = 'Cash';
+    else args.paymentMethod = 'Cash';
 
     args.description = message.replace(/[₹]/g, '').substring(0, 100);
 
@@ -167,10 +167,9 @@ function detectIntent(message: string): DetectedIntent | null {
     const clientName = extractClientName(message);
     if (clientName) args.clientName = clientName;
 
-    if (lower.includes('cash') || lower.includes('ক্যাশ')) args.paymentMethod = 'Cash';
-    else if (lower.includes('bkash') || lower.includes('বিকাশ')) args.paymentMethod = 'bKash';
+    if (lower.includes('upi') || lower.includes('গুগল পে') || lower.includes('phonepe')) args.paymentMethod = 'UPI';
     else if (lower.includes('bank') || lower.includes('ব্যাংক')) args.paymentMethod = 'Bank Transfer';
-    else if (lower.includes('upi')) args.paymentMethod = 'UPI';
+    else if (lower.includes('cash') || lower.includes('ক্যাশ')) args.paymentMethod = 'Cash';
     else args.paymentMethod = 'Cash';
 
     if (!args.amount || Number(args.amount) <= 0) missing.push('amount');

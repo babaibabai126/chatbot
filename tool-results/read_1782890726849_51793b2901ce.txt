@@ -1,0 +1,733 @@
+     1→     1→import { NextRequest, NextResponse } from 'next/server';
+     2→     2→import { db } from '@/lib/db';
+     3→     3→
+     4→     4→// ═══════════════════════════════════════════════════════════════════════════
+     5→     5→// ─── CONVERSATION STATE (multi-turn) ────────────────────────────────────
+     6→     6→// ═══════════════════════════════════════════════════════════════════════════
+     7→     7→
+     8→     8→interface PendingAction {
+     9→     9→  action: string;
+    10→    10→  args: Record<string, unknown>;
+    11→    11→  missingFields: string[];
+    12→    12→}
+    13→    13→
+    14→    14→interface ConversationState {
+    15→    15→  messages: Array<{ role: string; content: string }>;
+    16→    16→  pendingAction: PendingAction | null;
+    17→    17→}
+    18→    18→
+    19→    19→const conversations = new Map<string, ConversationState>();
+    20→    20→
+    21→    21→// ═══════════════════════════════════════════════════════════════════════════
+    22→    22→// ─── INTENT DETECTION (Bengali + English) ───────────────────────────────
+    23→    23→// ═══════════════════════════════════════════════════════════════════════════
+    24→    24→
+    25→    25→interface DetectedIntent {
+    26→    26→  action: string;
+    27→    27→  args: Record<string, unknown>;
+    28→    28→  missingFields: string[];
+    29→    29→}
+    30→    30→
+    31→    31→function detectIntent(message: string): DetectedIntent | null {
+    32→    32→  const lower = message.toLowerCase().trim();
+    33→    33→
+    34→    34→  // ── Create Bill (English + Bengali + Hinglish) ──
+    35→    35→  const billPatterns = [
+    36→    36→    /(create|make|generate|নতুন|তৈরি|বানাও|বানিয়ে|বানান|কর|দাও|করে)\s*(an?\s*)?(gst\s*)?(bill|invoice|বিল|চালান)/,
+    37→    37→    /(bill|invoice|বিল|চালান)\s*(create|make|generate|নতুন|তৈরি|বানাও|বানিয়ে|দাও|কর|হবে|লাগবে|চাই)/,
+    38→    38→    /(gst|non.?gst)\s*(bill|invoice|বিল|চালান)/,
+    39→    39→    /বিল\s*(বানাও|বানিয়ে|কর|দাও|তৈরি|নতুন|লাগবে|চাই|হবে)/,
+    40→    40→    /চালান\s*(বানাও|বানিয়ে|কর|দাও|তৈরি|নতুন|লাগবে|চাই|হবে)/,
+    41→    41→    /bill\s*(banao|banao|baniye|koro|kare|dao|lagbe|chai|hobe)/,
+    42→    42→  ];
+    43→    43→
+    44→    44→  let isBillIntent = false;
+    45→    45→  for (const p of billPatterns) {
+    46→    46→    if (lower.match(p)) { isBillIntent = true; break; }
+    47→    47→  }
+    48→    48→  // Also catch standalone "bill" with context words
+    49→    49→  if (!isBillIntent && (lower === 'bill' || lower === 'বিল' || lower === 'বিল বানাও' || lower === 'বিল দাও' || lower === 'bill banao' || lower === 'bill banaiye dao' || lower === 'bill baniye dao')) {
+    50→    50→    isBillIntent = true;
+    51→    51→  }
+    52→    52→
+    53→    53→  if (isBillIntent) {
+    54→    54→    const args: Record<string, unknown> = {};
+    55→    55→    const missing: string[] = [];
+    56→    56→
+    57→    57→    // Bill type
+    58→    58→    if (lower.includes('non-gst') || lower.includes('non gst') || lower.includes('নন জিএসটি') || lower.includes('নন-জিএসটি')) {
+    59→    59→      args.billType = 'non_gst';
+    60→    60→    } else if (lower.includes('gst') || lower.includes('জিএসটি') || lower.includes('জিএসট')) {
+    61→    61→      args.billType = 'gst';
+    62→    62→    }
+    63→    63→    // Default: no bill type specified - will ask
+    64→    64→
+    65→    65→    // Amount
+    66→    66→    const amountMatch = lower.match(/[₹rs\s]*([\d,]+(?:\.\d+)?)/);
+    67→    67→    if (amountMatch) {
+    68→    68→      const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+    69→    69→      if (amount > 0) {
+    70→    70→        const itemDesc = extractItemDescription(message);
+    71→    71→        args.items = [{ itemName: itemDesc || 'Service', rate: amount, quantity: 1, taxMode: 'excl' }];
+    72→    72→      }
+    73→    73→    }
+    74→    74→
+    75→    75→    // Client name
+    76→    76→    const clientName = extractClientName(message);
+    77→    77→    if (clientName) args.clientName = clientName;
+    78→    78→
+    79→    79→    // Check what's missing
+    80→    80→    if (!args.billType) missing.push('billType');
+    81→    81→    if (!args.items || (args.items as Array<Record<string, unknown>>).length === 0) missing.push('amount');
+    82→    82→    if (!args.clientName) missing.push('clientName');
+    83→    83→
+    84→    84→    return { action: 'create_bill', args, missingFields: missing };
+    85→    85→  }
+    86→    86→
+    87→    87→  // ── Add Client ──
+    88→    88→  const clientPatterns = [
+    89→    89→    /(add|create|নতুন|যোগ|তৈরি|যোগ\s*কর|add\s*kor)\s*(an?\s*)?(new\s*)?(client|customer|ক্লায়েন্ট|গ্রাহক)/,
+    90→    90→    /(client|customer|ক্লায়েন্ট|গ্রাহক)\s*(add|create|নতুন|যোগ|তৈরি|যোগ\s*কর|add\s*kor|lagbe|chai)/,
+    91→    91→    /ক্লায়েন্ট\s*(যোগ|নতুন|তৈরি|কর|দাও|লাগবে|চাই)/,
+    92→    92→    /client\s*(add|banao|lagbe|chai)/,
+    93→    93→  ];
+    94→    94→
+    95→    95→  let isClientIntent = false;
+    96→    96→  for (const p of clientPatterns) {
+    97→    97→    if (lower.match(p)) { isClientIntent = true; break; }
+    98→    98→  }
+    99→    99→
+   100→   100→  if (isClientIntent) {
+   101→   101→    const args: Record<string, unknown> = {};
+   102→   102→    const missing: string[] = [];
+   103→   103→
+   104→   104→    const nameMatch = message.match(/(?:named?|name[d]?\s*(?:is)?|নাম)\s*:?\s*([A-Za-z\s]+?)(?:\s*[,;.]|\s*(?:phone|ফোন|email|address|with)|$)/i);
+   105→   105→    if (nameMatch) args.name = nameMatch[1].trim();
+   106→   106→
+   107→   107→    const phoneMatch = message.match(/(?:phone|mobile|number|ফোন|নম্বর)\s*:?\s*([\d+\-\s]{8,15})/i);
+   108→   108→    if (phoneMatch) args.phone = phoneMatch[1].trim().replace(/\s/g, '');
+   109→   109→
+   110→   110→    const emailMatch = message.match(/[\w.-]+@[\w.-]+\.\w+/);
+   111→   111→    if (emailMatch) args.email = emailMatch[0];
+   112→   112→
+   113→   113→    if (!args.name) missing.push('name');
+   114→   114→    if (!args.phone) missing.push('phone');
+   115→   115→
+   116→   116→    return { action: 'create_client', args, missingFields: missing };
+   117→   117→  }
+   118→   118→
+   119→   119→  // ── Record Expense ──
+   120→   120→  const expensePatterns = [
+   121→   121→    /(add|record|log|create|যোগ|রেকর্ড|খরচ|কর)\s*(an?\s*)?(new\s*)?(expense|খরচ|expenditure)/,
+   122→   122→    /(expense|খরচ)\s*(add|record|log|create|যোগ|রেকর্ড|কর|দাও|লেখ|লিখ)/,
+   123→   123→    /খরচ\s*(যোগ|কর|দাও|রেকর্ড|হবে|লাগবে|চাই|লেখ|লিখ)/,
+   124→   124→    /expense\s*(add|koro|dao|lagbe|chai|lekho)/,
+   125→   125→  ];
+   126→   126→
+   127→   127→  let isExpenseIntent = false;
+   128→   128→  for (const p of expensePatterns) {
+   129→   129→    if (lower.match(p)) { isExpenseIntent = true; break; }
+   130→   130→  }
+   131→   131→
+   132→   132→  if (isExpenseIntent) {
+   133→   133→    const args: Record<string, unknown> = {};
+   134→   134→    const missing: string[] = [];
+   135→   135→
+   136→   136→    const amountMatch = lower.match(/[₹rs\s]*([\d,]+(?:\.\d+)?)/);
+   137→   137→    if (amountMatch) args.amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+   138→   138→
+   139→   139→    const categories = ['rent', 'salary', 'travel', 'food', 'internet', 'marketing', 'software', 'utilities', 'office', 'transport', 'miscellaneous',
+   140→   140→      'ভাড়া', 'বেতন', 'যাতায়াত', 'খাবার', 'অফিস'];
+   141→   141→    for (const cat of categories) {
+   142→   142→      if (lower.includes(cat)) { args.category = cat.charAt(0).toUpperCase() + cat.slice(1); break; }
+   143→   143→    }
+   144→   144→    if (!args.category) args.category = 'Miscellaneous';
+   145→   145→
+   146→   146→    if (lower.includes('cash') || lower.includes('ক্যাশ')) args.paymentMethod = 'Cash';
+   147→   147→    else if (lower.includes('bkash') || lower.includes('বিকাশ')) args.paymentMethod = 'bKash';
+   148→   148→    else if (lower.includes('bank') || lower.includes('ব্যাংক')) args.paymentMethod = 'Bank Transfer';
+   149→   149→    else if (lower.includes('upi')) args.paymentMethod = 'UPI';
+   150→   150→
+   151→   151→    args.description = message.replace(/[₹]/g, '').substring(0, 100);
+   152→   152→
+   153→   153→    if (!args.amount || Number(args.amount) <= 0) missing.push('amount');
+   154→   154→
+   155→   155→    return { action: 'create_expense', args, missingFields: missing };
+   156→   156→  }
+   157→   157→
+   158→   158→  // ── Record Payment ──
+   159→   159→  if (lower.match(/(record|received?|got|পেয়েছি|পেলাম|জমা|পেমেন্ট)\s*(an?\s*)?(payment|পেমেন্ট|টাকা)/) ||
+   160→   160→      lower.match(/(payment|পেমেন্ট)\s*(received?|from|record|জমা|পেয়েছি)/)) {
+   161→   161→    const args: Record<string, unknown> = {};
+   162→   162→    const missing: string[] = [];
+   163→   163→
+   164→   164→    const amountMatch = lower.match(/[₹rs\s]*([\d,]+(?:\.\d+)?)/);
+   165→   165→    if (amountMatch) args.amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+   166→   166→
+   167→   167→    const clientName = extractClientName(message);
+   168→   168→    if (clientName) args.clientName = clientName;
+   169→   169→
+   170→   170→    if (lower.includes('cash') || lower.includes('ক্যাশ')) args.paymentMethod = 'Cash';
+   171→   171→    else if (lower.includes('bkash') || lower.includes('বিকাশ')) args.paymentMethod = 'bKash';
+   172→   172→    else if (lower.includes('bank') || lower.includes('ব্যাংক')) args.paymentMethod = 'Bank Transfer';
+   173→   173→    else if (lower.includes('upi')) args.paymentMethod = 'UPI';
+   174→   174→    else args.paymentMethod = 'Cash';
+   175→   175→
+   176→   176→    if (!args.amount || Number(args.amount) <= 0) missing.push('amount');
+   177→   177→    if (!args.clientName) missing.push('clientName');
+   178→   178→
+   179→   179→    return { action: 'record_payment', args, missingFields: missing };
+   180→   180→  }
+   181→   181→
+   182→   182→  // ── Get Dues ──
+   183→   183→  if (lower.match(/(show|check|what|list|দেখ|দেখাও|কত|বকেয়া|বাকি)\s*(are\s*)?(my\s*)?(dues|outstanding|unpaid|overdue|বকেয়া|বাকি)/) ||
+   184→   184→      lower.match(/(dues|বকেয়া|বাকি)\s*(show|check|list|দেখ|দেখাও|কত)/) ||
+   185→   185→      lower.includes('dues') || lower.includes('বকেয়া') || lower.includes('বাকি কত') ||
+   186→   186→      lower === 'dues' || lower === 'বকেয়া') {
+   187→   187→    const args: Record<string, unknown> = {};
+   188→   188→    if (lower.includes('overdue') || lower.includes('মেয়াদোত্তীর্ণ')) args.filter = 'overdue';
+   189→   189→    else if (lower.includes('upcoming') || lower.includes('আসন্ন')) args.filter = 'upcoming';
+   190→   190→    else args.filter = 'all';
+   191→   191→    return { action: 'get_dues', args, missingFields: [] };
+   192→   192→  }
+   193→   193→
+   194→   194→  // ── Dashboard ──
+   195→   195→  if (lower.match(/(dashboard|summary|overview|সারসংক্ষেপ|ওভারভিউ|ড্যাশবোর্ড|how much|কত টাকা|earn|revenue|আয়|আয় কত)/) ||
+   196→   196→      lower === 'dashboard' || lower === 'ড্যাশবোর্ড' || lower === 'summary') {
+   197→   197→    const args: Record<string, unknown> = {};
+   198→   198→    if (lower.includes('today') || lower.includes('আজ')) args.period = 'today';
+   199→   199→    else if (lower.includes('week') || lower.includes('সপ্তাহ')) args.period = 'week';
+   200→   200→    else if (lower.includes('year') || lower.includes('বছর')) args.period = 'year';
+   201→   201→    else args.period = 'month';
+   202→   202→    return { action: 'get_dashboard', args, missingFields: [] };
+   203→   203→  }
+   204→   204→
+   205→   205→  // ── List Clients ──
+   206→   206→  if (lower.match(/(show|list|see|দেখ|দেখাও|তালিকা)\s*(all\s*)?(clients?|customers?|ক্লায়েন্ট|গ্রাহক)/) ||
+   207→   207→      lower.match(/(clients?|ক্লায়েন্ট)\s*(show|list|see|দেখ|দেখাও|তালিকা)/) ||
+   208→   208→      lower === 'clients' || lower === 'ক্লায়েন্ট' || lower === 'ক্লায়েন্ট দেখাও') {
+   209→   209→    return { action: 'list_clients', args: {}, missingFields: [] };
+   210→   210→  }
+   211→   211→
+   212→   212→  // ── List Bills ──
+   213→   213→  if (lower.match(/(show|list|see|দেখ|দেখাও|তালিকা)\s*(all\s*)?(bills?|invoices?|বিল|চালান)/) ||
+   214→   214→      lower.match(/(bills?|invoices?|বিল)\s*(show|list|see|দেখ|দেখাও|তালিকা)/) ||
+   215→   215→      lower === 'bills' || lower === 'বিল' || lower === 'বিল দেখাও' || lower === 'সব বিল') {
+   216→   216→    const args: Record<string, unknown> = {};
+   217→   217→    if (lower.includes('paid') || lower.includes('পরিশোধিত')) args.status = 'paid';
+   218→   218→    else if (lower.includes('unpaid') || lower.includes('অপরিশোধিত')) args.status = 'unpaid';
+   219→   219→    else args.status = 'all';
+   220→   220→    return { action: 'list_bills', args, missingFields: [] };
+   221→   221→  }
+   222→   222→
+   223→   223→  return null;
+   224→   224→}
+   225→   225→
+   226→   226→function extractClientName(message: string): string {
+   227→   227→  const patterns = [
+   228→   228→    /(?:for|client|customer|নাম|নামের)\s*:?\s*([A-Z][A-Za-z\s]{2,30}?)(?:\s*[,;.]|\s*(?:item|service|phone|email|with|amount|bill|create|add|₹)|$)/i,
+   229→   229→    /(?:named?|name)\s*:?\s*([A-Z][A-Za-z\s]{2,30}?)(?:\s*[,;.]|\s*(?:phone|email|with|item|₹)|$)/i,
+   230→   230→  ];
+   231→   231→  for (const p of patterns) {
+   232→   232→    const match = message.match(p);
+   233→   233→    if (match) return match[1].trim();
+   234→   234→  }
+   235→   235→  return '';
+   236→   236→}
+   237→   237→
+   238→   238→function extractItemDescription(message: string): string {
+   239→   239→  const patterns = [
+   240→   240→    /(?:item|service|product|আইটেম|সেবা|কাজ)\s*(?:is|:|হলো)?\s*([A-Za-z\s&]{3,50}?)(?:\s*[,;. ]|$)/i,
+   241→   241→  ];
+   242→   242→  for (const p of patterns) {
+   243→   243→    const match = message.match(p);
+   244→   244→    if (match && match[1]) return match[1].trim();
+   245→   245→  }
+   246→   246→  const forMatch = message.match(/for\s+(.+?)\s+(?:₹|rs\.?|of)/i);
+   247→   247→  if (forMatch) return forMatch[1].trim();
+   248→   248→  return '';
+   249→   249→}
+   250→   250→
+   251→   251→// ─── Process user's reply to a pending question ──
+   252→   252→function processPendingReply(message: string, pending: PendingAction): DetectedIntent | null {
+   253→   253→  const lower = message.toLowerCase().trim();
+   254→   254→
+   255→   255→  // If user is answering about bill type
+   256→   256→  if (pending.missingFields.includes('billType')) {
+   257→   257→    if (lower.includes('gst') && !lower.includes('non') && !lower.includes('নন')) {
+   258→   258→      pending.args.billType = 'gst';
+   259→   259→      pending.missingFields = pending.missingFields.filter(f => f !== 'billType');
+   260→   260→    } else if (lower.includes('non') || lower.includes('নন') || lower === '1' || lower === 'non gst') {
+   261→   261→      pending.args.billType = 'non_gst';
+   262→   262→      pending.missingFields = pending.missingFields.filter(f => f !== 'billType');
+   263→   263→    }
+   264→   264→  }
+   265→   265→
+   266→   266→  // If user is answering about amount
+   267→   267→  if (pending.missingFields.includes('amount')) {
+   268→   268→    const amountMatch = lower.match(/[₹rs\s]*([\d,]+(?:\.\d+)?)/);
+   269→   269→    if (amountMatch) {
+   270→   270→      const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+   271→   271→      if (amount > 0) {
+   272→   272→        if (pending.action === 'create_bill') {
+   273→   273→          pending.args.items = [{ itemName: 'Service', rate: amount, quantity: 1, taxMode: 'excl' }];
+   274→   274→        } else if (pending.action === 'create_expense' || pending.action === 'record_payment') {
+   275→   275→          pending.args.amount = amount;
+   276→   276→        }
+   277→   277→        pending.missingFields = pending.missingFields.filter(f => f !== 'amount');
+   278→   278→      }
+   279→   279→    }
+   280→   280→  }
+   281→   281→
+   282→   282→  // If user is answering about client name
+   283→   283→  if (pending.missingFields.includes('clientName')) {
+   284→   284→    // Try to extract a name - must be actual name, not "GST bill" etc
+   285→   285→    const nameMatch = message.match(/^([A-Z][A-Za-z\s]{1,30})$/);
+   286→   286→    if (nameMatch && !nameMatch[1].toLowerCase().match(/^(gst|bill|non|service|expense)/)) {
+   287→   287→      pending.args.clientName = nameMatch[1].trim();
+   288→   288→      pending.missingFields = pending.missingFields.filter(f => f !== 'clientName');
+   289→   289→    } else {
+   290→   290→      // Try "for X" or "name X" patterns
+   291→   291→      const forName = message.match(/(?:for|name[ds]?|নাম)\s*:?\s*([A-Z][A-Za-z\s]{1,30}?)(?:\s*[,;.]|$)/i);
+   292→   292→      if (forName) {
+   293→   293→        pending.args.clientName = forName[1].trim();
+   294→   294→        pending.missingFields = pending.missingFields.filter(f => f !== 'clientName');
+   295→   295→      }
+   296→   296→    }
+   297→   297→  }
+   298→   298→
+   299→   299→  // If user is answering about name (for client creation)
+   300→   300→  if (pending.missingFields.includes('name')) {
+   301→   301→    const nameMatch = message.match(/^([A-Z][A-Za-z\s]{1,30})$/);
+   302→   302→    if (nameMatch) {
+   303→   303→      pending.args.name = nameMatch[1].trim();
+   304→   304→      pending.missingFields = pending.missingFields.filter(f => f !== 'name');
+   305→   305→    } else {
+   306→   306→      const forName = message.match(/(?:name[ds]?|নাম)\s*:?\s*([A-Z][A-Za-z\s]{1,30}?)(?:\s*[,;.]|$)/i);
+   307→   307→      if (forName) {
+   308→   308→        pending.args.name = forName[1].trim();
+   309→   309→        pending.missingFields = pending.missingFields.filter(f => f !== 'name');
+   310→   310→      }
+   311→   311→    }
+   312→   312→  }
+   313→   313→
+   314→   314→  // If user is answering about phone
+   315→   315→  if (pending.missingFields.includes('phone')) {
+   316→   316→    const phoneMatch = message.match(/([\d+\-\s]{8,15})/);
+   317→   317→    if (phoneMatch) {
+   318→   318→      pending.args.phone = phoneMatch[1].trim().replace(/\s/g, '');
+   319→   319→      pending.missingFields = pending.missingFields.filter(f => f !== 'phone');
+   320→   320→    }
+   321→   321→  }
+   322→   322→
+   323→   323→  return { action: pending.action, args: pending.args, missingFields: pending.missingFields };
+   324→   324→}
+   325→   325→
+   326→   326→// ─── Ask for missing information ──
+   327→   327→function askForMissing(pending: PendingAction): string {
+   328→   328→  const field = pending.missingFields[0];
+   329→   329→  const action = pending.action;
+   330→   330→
+   331→   331→  switch (field) {
+   332→   332→    case 'billType':
+   333→   333→      return `📋 কোন ধরনের বিল চান? / What type of bill?\n\n1️⃣ GST Bill (জিএসটি বিল)\n2️⃣ Non-GST Bill (নন-জিএসটি বিল)\n\nউত্তর দিন: GST বা Non-GST`;
+   334→   334→
+   335→   335→    case 'amount':
+   336→   336→      if (action === 'create_bill') {
+   337→   337→        return `💰 বিলের পরিমাণ কত? / What's the bill amount?\n\nউদাহরণ: "₹10,000" বা "5000"`;
+   338→   338→      }
+   339→   339→      return `💰 পরিমাণ কত? / How much?\n\nউদাহরণ: "₹500" বা "1000"`;
+   340→   340→
+   341→   341→    case 'clientName':
+   342→   342→      return `👤 ক্লায়েন্টের নাম কী? / Client's name?\n\nউদাহরণ: "Rahul Sharma" বা "প্রিয়া সেন"`;
+   343→   343→
+   344→   344→    case 'name':
+   345→   345→      return `👤 ক্লায়েন্টের নাম কী? / Client's name?\n\nউদাহরণ: "Rahul Sharma"`;
+   346→   346→
+   347→   347→    case 'phone':
+   348→   348→      return `📞 ফোন নম্বর কী? / Phone number?\n\nউদাহরণ: "9876543210"`;
+   349→   349→
+   350→   350→    default:
+   351→   351→      return `আরও তথ্য দিন / Please provide more details.`;
+   352→   352→  }
+   353→   353→}
+   354→   354→
+   355→   355→// ═══════════════════════════════════════════════════════════════════════════
+   356→   356→// ─── GEMINI API ─────────────────────────────────────────────────────────
+   357→   357→// ═══════════════════════════════════════════════════════════════════════════
+   358→   358→
+   359→   359→const SYSTEM_PROMPT = `You are the AI assistant for "AAROHAN BUSINESS HUB" - a multi-business management platform.
+   360→   360→
+   361→   361→Business Details:
+   362→   362→1. AAROHAN TECH SOLUTIONS (Marketing Agency) - GST NO: 19MKIPS8902F1ZG, Address: 24/27 A.K.M ROAD, BARANAGAR, KOLKATA - 700090, Contact: 6290717007
+   363→   363→2. ASTRONAUT STIKERZ (Notebook & Mousepad)
+   364→   364→3. AAROHAN WEB ACADEMY (Institute)
+   365→   365→
+   366→   366→Rules:
+   367→   367→1. Respond in Bengali + English (bilingual)
+   368→   368→2. Use ₹ (INR) for all amounts
+   369→   369→3. GST: CGST 9% + SGST 9% = 18%
+   370→   370→4. Be concise and friendly`;
+   371→   371→
+   372→   372→async function callGemini(messages: Array<{ role: string; content: string }>): Promise<string | null> {
+   373→   373→  const apiKey = process.env.GEMINI_API_KEY;
+   374→   374→  if (!apiKey) return null;
+   375→   375→
+   376→   376→  try {
+   377→   377→    const contents = [];
+   378→   378→    for (let i = 1; i < messages.length; i++) {
+   379→   379→      const m = messages[i];
+   380→   380→      if (m.role === 'user') contents.push({ role: 'user', parts: [{ text: m.content }] });
+   381→   381→      else if (m.role === 'assistant') contents.push({ role: 'model', parts: [{ text: m.content }] });
+   382→   382→    }
+   383→   383→
+   384→   384→    if (contents.length === 0) return null;
+   385→   385→
+   386→   386→    const controller = new AbortController();
+   387→   387→    const timeout = setTimeout(() => controller.abort(), 20000);
+   388→   388→
+   389→   389→    const response = await fetch(
+   390→   390→      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+   391→   391→      {
+   392→   392→        method: 'POST',
+   393→   393→        headers: { 'Content-Type': 'application/json' },
+   394→   394→        body: JSON.stringify({
+   395→   395→          contents,
+   396→   396→          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+   397→   397→          generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+   398→   398→        }),
+   399→   399→        signal: controller.signal,
+   400→   400→      }
+   401→   401→    );
+   402→   402→
+   403→   403→    clearTimeout(timeout);
+   404→   404→    if (!response.ok) return null;
+   405→   405→
+   406→   406→    const data = await response.json();
+   407→   407→    return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+   408→   408→  } catch {
+   409→   409→    return null;
+   410→   410→  }
+   411→   411→}
+   412→   412→
+   413→   413→// ═══════════════════════════════════════════════════════════════════════════
+   414→   414→// ─── ZAI SDK FALLBACK ───────────────────────────────────────────────────
+   415→   415→// ═══════════════════════════════════════════════════════════════════════════
+   416→   416→
+   417→   417→let zaiInstance: any = null;
+   418→   418→let zaiInitPromise: Promise<any> | null = null;
+   419→   419→
+   420→   420→async function getZAI(): Promise<any> {
+   421→   421→  if (zaiInstance) return zaiInstance;
+   422→   422→  if (zaiInitPromise) return zaiInitPromise;
+   423→   423→  zaiInitPromise = (async () => {
+   424→   424→    try {
+   425→   425→      const ZAI = (await import('z-ai-web-dev-sdk')).default;
+   426→   426→      zaiInstance = await ZAI.create();
+   427→   427→      return zaiInstance;
+   428→   428→    } catch { zaiInitPromise = null; return null; }
+   429→   429→  })();
+   430→   430→  return zaiInitPromise;
+   431→   431→}
+   432→   432→
+   433→   433→// ═══════════════════════════════════════════════════════════════════════════
+   434→   434→// ─── ACTION EXECUTORS ──────────────────────────────────────────────────
+   435→   435→// ═══════════════════════════════════════════════════════════════════════════
+   436→   436→
+   437→   437→async function executeCreateBill(args: Record<string, unknown>, businessId: string) {
+   438→   438→  try {
+   439→   439→    const billType = String(args.billType || 'non_gst');
+   440→   440→    const items = (args.items as Array<Record<string, unknown>>) || [];
+   441→   441→    const clientName = String(args.clientName || '');
+   442→   442→    const GST_RATE = 0.18;
+   443→   443→
+   444→   444→    let clientId = '';
+   445→   445→    let clientObj = null;
+   446→   446→    if (clientName) {
+   447→   447→      clientObj = await db.client.findFirst({ where: { businessId, name: { contains: clientName, mode: 'insensitive' } } });
+   448→   448→      if (!clientObj) {
+   449→   449→        clientObj = await db.client.create({
+   450→   450→          data: { businessId, name: clientName, phone: String(args.clientPhone || '0000000000'), address: args.clientAddress ? String(args.clientAddress) : null },
+   451→   451→        });
+   452→   452→      }
+   453→   453→      clientId = clientObj.id;
+   454→   454→    } else {
+   455→   455→      const firstClient = await db.client.findFirst({ where: { businessId } });
+   456→   456→      if (firstClient) { clientId = firstClient.id; clientObj = firstClient; }
+   457→   457→    }
+   458→   458→
+   459→   459→    if (!clientId) return { success: false, result: null, message: '❌ কোনো ক্লায়েন্ট পাওয়া যায়নি। ক্লায়েন্টের নাম দিন। / No client found. Please provide a client name.' };
+   460→   460→    if (items.length === 0) return { success: false, result: null, message: '❌ কোনো আইটেম পাওয়া যায়নি। পরিমাণ দিন। / No items found. Please provide amount.' };
+   461→   461→
+   462→   462→    let subtotal = 0, totalGst = 0;
+   463→   463→    const processedItems = items.map((item) => {
+   464→   464→      const rate = Number(item.rate) || 0;
+   465→   465→      const qty = Number(item.quantity) || 1;
+   466→   466→      const taxMode = String(item.taxMode || 'excl');
+   467→   467→      const baseRate = taxMode === 'incl' ? rate / (1 + GST_RATE) : rate;
+   468→   468→      const itemGst = billType === 'gst' ? baseRate * GST_RATE * qty : 0;
+   469→   469→      const amount = billType === 'gst' ? (taxMode === 'incl' ? rate * qty : baseRate * (1 + GST_RATE) * qty) : rate * qty;
+   470→   470→      subtotal += baseRate * qty;
+   471→   471→      totalGst += itemGst;
+   472→   472→      return { description: String(item.itemName || ''), quantity: qty, rate, amount, itemName: String(item.itemName || ''), taxMode, cgst: billType === 'gst' ? baseRate * 0.09 * qty : 0, sgst: billType === 'gst' ? baseRate * 0.09 * qty : 0, baseRate };
+   473→   473→    });
+   474→   474→
+   475→   475→    const total = billType === 'gst' ? subtotal + totalGst : subtotal;
+   476→   476→    const bill = await db.bill.create({
+   477→   477→      data: { businessId, clientId, billNumber: `ATS/${new Date().getFullYear().toString().slice(2)}-${String(new Date().getMonth() + 1).padStart(2, '0')}/${String(Math.floor(Math.random() * 900) + 100)}`, date: new Date(), dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), subtotal: billType === 'gst' ? subtotal : total, tax: totalGst, discount: 0, total, billType, clientGst: args.clientGst ? String(args.clientGst) : null, clientAddress: args.clientAddress ? String(args.clientAddress) : null, notes: args.notes ? String(args.notes) : null, items: { create: processedItems } },
+   478→   478→      include: { items: true, client: true },
+   479→   479→    });
+   480→   480→
+   481→   481→    const itemSummary = processedItems.map(i => `  • ${i.itemName}: ₹${i.rate} × ${i.quantity} = ₹${i.amount.toFixed(2)}`).join('\n');
+   482→   482→    return { success: true, result: bill, message: `✅ বিল তৈরি হয়েছে! / Bill Created!\n\n📄 Bill #${bill.billNumber}\n👤 Client: ${bill.client.name}\n📋 Items:\n${itemSummary}\n${billType === 'gst' ? `💰 Subtotal: ₹${subtotal.toFixed(2)}\n📊 GST (CGST 9% + SGST 9%): ₹${totalGst.toFixed(2)}\n` : ''}💵 Total: ₹${total.toFixed(2)}\n🏷️ Type: ${billType === 'gst' ? 'GST Bill' : 'Non-GST Bill'}` };
+   483→   483→  } catch (error) {
+   484→   484→    return { success: false, result: null, message: `❌ বিল তৈরি করতে সমস্যা: ${error instanceof Error ? error.message : 'Unknown'}` };
+   485→   485→  }
+   486→   486→}
+   487→   487→
+   488→   488→async function executeCreateClient(args: Record<string, unknown>, businessId: string) {
+   489→   489→  try {
+   490→   490→    if (!args.name) return { success: false, result: null, message: '❌ ক্লায়েন্টের নাম দিন।' };
+   491→   491→    if (!args.phone) return { success: false, result: null, message: '❌ ফোন নম্বর দিন।' };
+   492→   492→    const client = await db.client.create({
+   493→   493→      data: { businessId, name: String(args.name), phone: String(args.phone), email: args.email ? String(args.email) : null, address: args.address ? String(args.address) : null, company: args.company ? String(args.company) : null },
+   494→   494→    });
+   495→   495→    return { success: true, result: client, message: `✅ ক্লায়েন্ট যোগ হয়েছে! / Client Added!\n\n👤 Name: ${client.name}\n📞 Phone: ${client.phone}${client.email ? `\n📧 Email: ${client.email}` : ''}${client.address ? `\n📍 Address: ${client.address}` : ''}${client.company ? `\n🏢 Company: ${client.company}` : ''}` };
+   496→   496→  } catch (error) {
+   497→   497→    return { success: false, result: null, message: `❌ ক্লায়েন্ট যোগ করতে সমস্যা: ${error instanceof Error ? error.message : 'Unknown'}` };
+   498→   498→  }
+   499→   499→}
+   500→   500→
+   501→   501→async function executeCreateExpense(args: Record<string, unknown>, businessId: string) {
+   502→   502→  try {
+   503→   503→    if (!args.amount || Number(args.amount) <= 0) return { success: false, result: null, message: '❌ খরচের পরিমাণ দিন।' };
+   504→   504→    const expense = await db.expense.create({
+   505→   505→      data: { businessId, category: String(args.category || 'Miscellaneous'), description: String(args.description || ''), amount: Number(args.amount), date: new Date(), paymentMethod: args.paymentMethod ? String(args.paymentMethod) : null },
+   506→   506→    });
+   507→   507→    return { success: true, result: expense, message: `✅ খরচ রেকর্ড হয়েছে! / Expense Recorded!\n\n💰 Amount: ₹${expense.amount}\n📂 Category: ${expense.category}\n📝 Description: ${expense.description}${expense.paymentMethod ? `\n💳 Payment: ${expense.paymentMethod}` : ''}` };
+   508→   508→  } catch (error) {
+   509→   509→    return { success: false, result: null, message: `❌ খরচ রেকর্ড করতে সমস্যা: ${error instanceof Error ? error.message : 'Unknown'}` };
+   510→   510→  }
+   511→   511→}
+   512→   512→
+   513→   513→async function executeRecordPayment(args: Record<string, unknown>, businessId: string) {
+   514→   514→  try {
+   515→   515→    const clientName = String(args.clientName || '');
+   516→   516→    const amount = Number(args.amount) || 0;
+   517→   517→    const paymentMethod = String(args.paymentMethod || 'Cash');
+   518→   518→    if (!clientName) return { success: false, result: null, message: '❌ ক্লায়েন্টের নাম দিন।' };
+   519→   519→    if (amount <= 0) return { success: false, result: null, message: '❌ পরিমাণ দিন।' };
+   520→   520→
+   521→   521→    const client = await db.client.findFirst({ where: { businessId, name: { contains: clientName, mode: 'insensitive' } } });
+   522→   522→    if (!client) return { success: false, result: null, message: `❌ "${clientName}" নামের ক্লায়েন্ট পাওয়া যায়নি।` };
+   523→   523→
+   524→   524→    let billId: string | null = null;
+   525→   525→    const unpaidBill = await db.bill.findFirst({ where: { businessId, clientId: client.id, status: { in: ['unpaid', 'partial'] } }, orderBy: { date: 'asc' } });
+   526→   526→    if (unpaidBill) billId = unpaidBill.id;
+   527→   527→
+   528→   528→    const payment = await db.payment.create({ data: { businessId, clientId: client.id, billId, amount, date: new Date(), paymentMethod, receiptNumber: `RCP-${Date.now().toString().slice(-6)}`, notes: args.notes ? String(args.notes) : null } });
+   529→   529→
+   530→   530→    if (billId) {
+   531→   531→      const bill = await db.bill.findUnique({ where: { id: billId } });
+   532→   532→      if (bill) { const newPaid = bill.paidAmount + amount; await db.bill.update({ where: { id: billId }, data: { paidAmount: newPaid, status: newPaid >= bill.total ? 'paid' : 'partial' } }); }
+   533→   533→    }
+   534→   534→    return { success: true, result: payment, message: `✅ পেমেন্ট রেকর্ড হয়েছে! / Payment Recorded!\n\n👤 Client: ${client.name}\n💰 Amount: ₹${amount}\n💳 Method: ${paymentMethod}\n🧾 Receipt: ${payment.receiptNumber}` };
+   535→   535→  } catch (error) {
+   536→   536→    return { success: false, result: null, message: `❌ Error: ${error instanceof Error ? error.message : 'Unknown'}` };
+   537→   537→  }
+   538→   538→}
+   539→   539→
+   540→   540→async function executeGetDues(args: Record<string, unknown>, businessId: string) {
+   541→   541→  try {
+   542→   542→    const filter = String(args.filter || 'all');
+   543→   543→    const now = new Date();
+   544→   544→    const where: Record<string, unknown> = { businessId, status: { in: ['unpaid', 'partial'] } };
+   545→   545→    if (filter === 'overdue') where.dueDate = { lt: now };
+   546→   546→    else if (filter === 'upcoming') where.dueDate = { gte: now };
+   547→   547→    const bills = await db.bill.findMany({ where, include: { client: { select: { name: true } } }, orderBy: { dueDate: 'asc' }, take: 20 });
+   548→   548→    if (bills.length === 0) return { success: true, result: [], message: '✅ কোনো বকেয়া নেই! / No dues! 🎉' };
+   549→   549→    const totalDue = bills.reduce((s, b) => s + (b.total - b.paidAmount), 0);
+   550→   550→    const list = bills.map(b => `  ${b.dueDate < now ? '🔴' : '🟡'} ${b.client.name} - ₹${(b.total - b.paidAmount).toFixed(2)} (#${b.billNumber})`).join('\n');
+   551→   551→    return { success: true, result: bills, message: `⚠️ বকেয়া তালিকা / Dues:\n\n${list}\n\n💰 মোট বকেয়া / Total: ₹${totalDue.toFixed(2)}` };
+   552→   552→  } catch (error) { return { success: false, result: null, message: `❌ Error: ${error instanceof Error ? error.message : 'Unknown'}` }; }
+   553→   553→}
+   554→   554→
+   555→   555→async function executeGetDashboard(args: Record<string, unknown>, businessId: string) {
+   556→   556→  try {
+   557→   557→    const period = String(args.period || 'month');
+   558→   558→    const now = new Date();
+   559→   559→    let start = new Date(now);
+   560→   560→    switch (period) { case 'today': start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break; case 'week': start = new Date(now.getTime() - 7*24*60*60*1000); break; case 'month': start = new Date(now.getFullYear(), now.getMonth(), 1); break; case 'year': start = new Date(now.getFullYear(), 0, 1); break; default: start = new Date(2020, 0, 1); }
+   561→   561→    const [bills, expenses, payments, clients] = await Promise.all([
+   562→   562→      db.bill.findMany({ where: { businessId, date: { gte: start } } }),
+   563→   563→      db.expense.findMany({ where: { businessId, date: { gte: start } } }),
+   564→   564→      db.payment.findMany({ where: { businessId, date: { gte: start } } }),
+   565→   565→      db.client.count({ where: { businessId } }),
+   566→   566→    ]);
+   567→   567→    const rev = bills.reduce((s, b) => s + b.total, 0), paid = bills.reduce((s, b) => s + b.paidAmount, 0), exp = expenses.reduce((s, e) => s + e.amount, 0), recv = payments.reduce((s, p) => s + p.amount, 0);
+   568→   568→    const pl: Record<string, string> = { today: 'আজ/Today', week: 'সপ্তাহ/Week', month: 'মাস/Month', year: 'বছর/Year', all: 'সব/All' };
+   569→   569→    return { success: true, result: {}, message: `📊 ${pl[period] || pl.month} Summary:\n\n💰 Revenue: ₹${rev.toFixed(2)}\n💵 Received: ₹${recv.toFixed(2)}\n📂 Expenses: ₹${exp.toFixed(2)}\n⚠️ Outstanding: ₹${(rev - paid).toFixed(2)}\n📈 Profit: ₹${(paid - exp).toFixed(2)}\n👥 Clients: ${clients}` };
+   570→   570→  } catch (error) { return { success: false, result: null, message: `❌ Error: ${error instanceof Error ? error.message : 'Unknown'}` }; }
+   571→   571→}
+   572→   572→
+   573→   573→async function executeListClients(args: Record<string, unknown>, businessId: string) {
+   574→   574→  try {
+   575→   575→    const clients = await db.client.findMany({ where: { businessId }, take: 20, orderBy: { createdAt: 'desc' } });
+   576→   576→    if (clients.length === 0) return { success: true, result: [], message: '👥 কোনো ক্লায়েন্ট নেই। / No clients.' };
+   577→   577→    const list = clients.map(c => `  👤 ${c.name} | 📞 ${c.phone}${c.company ? ` | 🏢 ${c.company}` : ''}`).join('\n');
+   578→   578→    return { success: true, result: clients, message: `👥 ক্লায়েন্ট (${clients.length}):\n\n${list}` };
+   579→   579→  } catch (error) { return { success: false, result: null, message: `❌ Error` }; }
+   580→   580→}
+   581→   581→
+   582→   582→async function executeListBills(args: Record<string, unknown>, businessId: string) {
+   583→   583→  try {
+   584→   584→    const status = String(args.status || 'all');
+   585→   585→    const where: Record<string, unknown> = { businessId };
+   586→   586→    if (status !== 'all') where.status = status;
+   587→   587→    const bills = await db.bill.findMany({ where, include: { client: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 10 });
+   588→   588→    if (bills.length === 0) return { success: true, result: [], message: '📄 কোনো বিল নেই। / No bills.' };
+   589→   589→    const list = bills.map(b => `  ${b.status === 'paid' ? '✅' : b.status === 'partial' ? '🟡' : '🔴'} #${b.billNumber} | ${b.client.name} | ₹${b.total.toFixed(2)} | ${b.billType.toUpperCase()}`).join('\n');
+   590→   590→    return { success: true, result: bills, message: `📄 বিল (${bills.length}):\n\n${list}` };
+   591→   591→  } catch (error) { return { success: false, result: null, message: `❌ Error` }; }
+   592→   592→}
+   593→   593→
+   594→   594→async function executeFunction(name: string, args: Record<string, unknown>, businessId: string) {
+   595→   595→  switch (name) {
+   596→   596→    case 'create_bill': return executeCreateBill(args, businessId);
+   597→   597→    case 'create_client': return executeCreateClient(args, businessId);
+   598→   598→    case 'create_expense': return executeCreateExpense(args, businessId);
+   599→   599→    case 'record_payment': return executeRecordPayment(args, businessId);
+   600→   600→    case 'get_dues': return executeGetDues(args, businessId);
+   601→   601→    case 'get_dashboard': return executeGetDashboard(args, businessId);
+   602→   602→    case 'list_clients': return executeListClients(args, businessId);
+   603→   603→    case 'list_bills': return executeListBills(args, businessId);
+   604→   604→    default: return { success: false, result: null, message: '❌ Unknown action' };
+   605→   605→  }
+   606→   606→}
+   607→   607→
+   608→   608→// ═══════════════════════════════════════════════════════════════════════════
+   609→   609→// ─── MAIN HANDLER ──────────────────────────────────────────────────────
+   610→   610→// ═══════════════════════════════════════════════════════════════════════════
+   611→   611→
+   612→   612→export async function POST(request: NextRequest) {
+   613→   613→  try {
+   614→   614→    const { sessionId, message, context } = await request.json();
+   615→   615→    if (!message || typeof message !== 'string') return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+   616→   616→
+   617→   617→    const businessId = context?.businessId || '';
+   618→   618→
+   619→   619→    // Get or create conversation state
+   620→   620→    let state = conversations.get(sessionId);
+   621→   621→    if (!state) {
+   622→   622→      state = { messages: [{ role: 'assistant', content: SYSTEM_PROMPT }], pendingAction: null };
+   623→   623→    }
+   624→   624→
+   625→   625→    state.messages.push({ role: 'user', content: message });
+   626→   626→    if (state.messages.length > 22) state.messages = [state.messages[0], ...state.messages.slice(-20)];
+   627→   627→
+   628→   628→    let aiResponse: string | null = null;
+   629→   629→    let actionExecuted = false;
+   630→   630→    let actionData = null;
+   631→   631→
+   632→   632→    // ── CHECK PENDING ACTION (multi-turn) ──
+   633→   633→    if (state.pendingAction) {
+   634→   634→      // Check if user is cancelling
+   635→   635→      const lower = message.toLowerCase();
+   636→   636→      if (lower.match(/cancel|বাতিল|না|no|stop|থাম/)) {
+   637→   637→        state.pendingAction = null;
+   638→   638→        aiResponse = '👌 বাতিল করা হয়েছে। অন্য কিছু বলুন! / Cancelled. What else can I help with?';
+   639→   639→      } else {
+   640→   640→        // Process the reply
+   641→   641→        const updated = processPendingReply(message, state.pendingAction);
+   642→   642→
+   643→   643→        if (updated && updated.missingFields.length === 0) {
+   644→   644→          // All info collected - execute!
+   645→   645→          if (businessId) {
+   646→   646→            const result = await executeFunction(updated.action, updated.args, businessId);
+   647→   647→            actionExecuted = result.success;
+   648→   648→            actionData = result.success ? result.result : null;
+   649→   649→            aiResponse = result.message;
+   650→   650→          } else {
+   651→   651→            aiResponse = '❌ ব্যবসা নির্বাচন করুন।';
+   652→   652→          }
+   653→   653→          state.pendingAction = null;
+   654→   654→        } else if (updated && updated.missingFields.length > 0) {
+   655→   655→          // Still missing info - ask again
+   656→   656→          state.pendingAction = { action: updated.action, args: updated.args, missingFields: updated.missingFields };
+   657→   657→          aiResponse = askForMissing(state.pendingAction);
+   658→   658→        } else {
+   659→   659→          // Couldn't parse reply - ask again
+   660→   660→          aiResponse = askForMissing(state.pendingAction);
+   661→   661→        }
+   662→   662→      }
+   663→   663→    } else {
+   664→   664→      // ── NEW INTENT DETECTION ──
+   665→   665→      const intent = detectIntent(message);
+   666→   666→
+   667→   667→      if (intent) {
+   668→   668→        if (intent.missingFields.length === 0) {
+   669→   669→          // All info provided - execute immediately
+   670→   670→          if (businessId) {
+   671→   671→            const result = await executeFunction(intent.action, intent.args, businessId);
+   672→   672→            actionExecuted = result.success;
+   673→   673→            actionData = result.success ? result.result : null;
+   674→   674→            aiResponse = result.message;
+   675→   675→          } else {
+   676→   676→            aiResponse = '❌ ব্যবসা নির্বাচন করুন।';
+   677→   677→          }
+   678→   678→        } else {
+   679→   679→          // Missing info - ask user
+   680→   680→          state.pendingAction = { action: intent.action, args: intent.args, missingFields: intent.missingFields };
+   681→   681→          aiResponse = askForMissing(state.pendingAction);
+   682→   682→        }
+   683→   683→      } else {
+   684→   684→        // No intent detected - use LLM for conversation
+   685→   685→        const geminiText = await callGemini(state.messages);
+   686→   686→        if (geminiText) {
+   687→   687→          aiResponse = geminiText;
+   688→   688→        } else {
+   689→   689→          // Try ZAI
+   690→   690→          try {
+   691→   691→            const zai = await getZAI();
+   692→   692→            if (zai) {
+   693→   693→              const zaiMsgs = state.messages.filter(m => m.role === 'user' || (m.role === 'assistant' && m !== state!.messages[0])).slice(-8).map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }));
+   694→   694→              zaiMsgs.unshift({ role: 'user', content: SYSTEM_PROMPT });
+   695→   695→              const zaiResp = await zai.chat.completions.create({ messages: zaiMsgs, thinking: { type: 'disabled' } });
+   696→   696→              aiResponse = zaiResp?.choices?.[0]?.message?.content || null;
+   697→   697→            }
+   698→   698→          } catch { /* ignore */ }
+   699→   699→        }
+   700→   700→
+   701→   701→        // Final fallback
+   702→   702→        if (!aiResponse) {
+   703→   703→          const lower = message.toLowerCase();
+   704→   704→          if (lower.match(/হ্যালো|হ্যাই|hello|hi|hey|নমস্কার|কেমন আছ/)) {
+   705→   705→            aiResponse = `নমস্কার! / Hello! 👋\n\nআমি AAROHAN Business Hub এর AI সহকারী। আমি সরাসরি কাজ করতে পারি:\n\n• 📄 "বিল বানাও" / "Create a bill"\n• 👥 "ক্লায়েন্ট যোগ কর" / "Add client"\n• 💰 "খরচ লেখ" / "Record expense ₹500"\n• ⚠️ "বকেয়া দেখাও" / "Show dues"\n• 📊 "ড্যাশবোর্ড" / "Dashboard"\n\nকী করতে চান?`;
+   706→   706→          } else {
+   707→   707→            aiResponse = `🙏 আমি AAROHAN Business Hub এর AI সহকারী।\n\nআমি সরাসরি কাজ করতে পারি:\n• 📄 "বিল বানাও" বা "Create a GST bill for ₹10,000 for Rahul"\n• 👥 "ক্লায়েন্ট যোগ কর" বা "Add client named Priya, phone 9876543210"\n• 💰 "খরচ লেখ ₹500 internet" বা "Record expense ₹500 for internet"\n• ⚠️ "বকেয়া দেখাও" / "Show dues"\n• 📊 "ড্যাশবোর্ড"\n\nকী করতে চান?`;
+   708→   708→          }
+   709→   709→        }
+   710→   710→      }
+   711→   711→    }
+   712→   712→
+   713→   713→    state.messages.push({ role: 'assistant', content: aiResponse });
+   714→   714→    conversations.set(sessionId, state);
+   715→   715→
+   716→   716→    return NextResponse.json({ success: true, response: aiResponse, actionExecuted, actionData });
+   717→   717→  } catch (error) {
+   718→   718→    console.error('Chat API error:', error);
+   719→   719→    return NextResponse.json({ error: 'Failed to get response' }, { status: 500 });
+   720→   720→  }
+   721→   721→}
+   722→   722→
+   723→   723→export async function DELETE(request: NextRequest) {
+   724→   724→  try {
+   725→   725→    const { searchParams } = new URL(request.url);
+   726→   726→    const sessionId = searchParams.get('sessionId');
+   727→   727→    if (sessionId) conversations.delete(sessionId);
+   728→   728→    return NextResponse.json({ success: true });
+   729→   729→  } catch {
+   730→   730→    return NextResponse.json({ error: 'Failed' }, { status: 500 });
+   731→   731→  }
+   732→   732→}
+   733→   733→

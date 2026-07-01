@@ -38,7 +38,7 @@ export default function ExpensesView({ businessId, businessName }: { businessId:
     date: new Date().toISOString().split('T')[0], paymentMethod: 'Cash',
   });
 
-  const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 0 })}`;
+  const fmt = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
   const fetchExpenses = useCallback(async () => {
     try {
@@ -112,11 +112,9 @@ export default function ExpensesView({ businessId, businessName }: { businessId:
                   <Select value={form.paymentMethod} onValueChange={(v) => setForm({ ...form, paymentMethod: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Cash">ক্যাশ / Cash</SelectItem>
-                      <SelectItem value="bKash">বিকাশ / bKash</SelectItem>
-                      <SelectItem value="Nagad">নগদ / Nagad</SelectItem>
-                      <SelectItem value="Bank">ব্যাংক / Bank</SelectItem>
-                      <SelectItem value="Card">কার্ড / Card</SelectItem>
+                      <SelectItem value="Cash">Cash</SelectItem>
+                      <SelectItem value="UPI">UPI</SelectItem>
+                      <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -157,7 +155,7 @@ export default function ExpensesView({ businessId, businessName }: { businessId:
                   <div className="h-10 w-10 rounded-lg bg-orange-50 flex items-center justify-center"><Wallet className="h-5 w-5 text-orange-500" /></div>
                   <div>
                     <p className="font-medium text-gray-900">{e.description}</p>
-                    <p className="text-xs text-gray-500">{e.category} • {new Date(e.date).toLocaleDateString('en-BD')}{e.paymentMethod ? ` • ${e.paymentMethod}` : ''}</p>
+                    <p className="text-xs text-gray-500">{e.category} • {new Date(e.date).toLocaleDateString('en-IN')}{e.paymentMethod ? ` • ${e.paymentMethod}` : ''}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">

@@ -1,0 +1,514 @@
+     1→'use client';
+     2→
+     3→import { useEffect, useState, useCallback } from 'react';
+     4→import { Card } from '@/components/ui/card';
+     5→import { Button } from '@/components/ui/button';
+     6→import { Input } from '@/components/ui/input';
+     7→import { Label } from '@/components/ui/label';
+     8→import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+     9→import { Badge } from '@/components/ui/badge';
+    10→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+    11→import { FileText, Plus, Trash2, Eye, FileCheck, FileMinus, UserCheck, UserPlus } from 'lucide-react';
+    12→import InvoicePreview from './invoice-preview';
+    13→
+    14→export interface Client { id: string; name: string; company: string | null; phone: string; address: string | null; email: string | null; }
+    15→export interface BillItem { id?: string; description: string; quantity: string; rate: string; amount: string; itemName: string; taxMode: string; cgst: string; sgst: string; baseRate: string; }
+    16→export interface Bill {
+    17→  id: string; billNumber: string; clientId: string; date: string; dueDate: string;
+    18→  subtotal: number; tax: number; discount: number; total: number; paidAmount: number;
+    19→  status: string; notes: string | null; billType: string; clientGst: string | null; clientAddress: string | null;
+    20→  client: Client; items: BillItem[];
+    21→}
+    22→
+    23→const GST_RATE = 0.18;
+    24→const CGST_RATE = 0.09;
+    25→const SGST_RATE = 0.09;
+    26→
+    27→export default function BillsView({ businessId }: { businessId: string }) {
+    28→  const [bills, setBills] = useState<Bill[]>([]);
+    29→  const [clients, setClients] = useState<Client[]>([]);
+    30→  const [loading, setLoading] = useState(true);
+    31→  const [dialogOpen, setDialogOpen] = useState(false);
+    32→  const [viewBill, setViewBill] = useState<Bill | null>(null);
+    33→  const [billType, setBillType] = useState<'gst' | 'non_gst'>('non_gst');
+    34→  const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing');
+    35→  const [form, setForm] = useState({
+    36→    clientId: '', billNumber: '', date: new Date().toISOString().split('T')[0],
+    37→    dueDate: '', discount: '0', notes: '', clientGst: '', clientAddress: '',
+    38→    // New client fields
+    39→    newClientName: '', newClientPhone: '', newClientAddress: '', newClientEmail: '', newClientCompany: '',
+    40→  });
+    41→  const [items, setItems] = useState<BillItem[]>([{
+    42→    description: '', quantity: '1', rate: '0', amount: '0',
+    43→    itemName: '', taxMode: 'excl', cgst: '0', sgst: '0', baseRate: '0',
+    44→  }]);
+    45→
+    46→  const fmt = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    47→
+    48→  const fetchData = useCallback(async () => {
+    49→    try {
+    50→      const [bRes, cRes] = await Promise.all([
+    51→        fetch(`/api/bills?businessId=${businessId}`),
+    52→        fetch(`/api/clients?businessId=${businessId}`),
+    53→      ]);
+    54→      setBills(await bRes.json());
+    55→      setClients(await cRes.json());
+    56→    } catch (err) { console.error(err); }
+    57→    finally { setLoading(false); }
+    58→  }, [businessId]);
+    59→
+    60→  useEffect(() => { fetchData(); }, [fetchData]);
+    61→
+    62→  const updateItem = (index: number, field: string, value: string) => {
+    63→    const newItems = [...items];
+    64→    (newItems[index] as Record<string, string>)[field] = value;
+    65→
+    66→    const q = parseFloat(newItems[index].quantity) || 0;
+    67→    const r = parseFloat(newItems[index].rate) || 0;
+    68→
+    69→    if (field === 'quantity' || field === 'rate' || field === 'taxMode') {
+    70→      if (billType === 'gst') {
+    71→        const taxMode = newItems[index].taxMode;
+    72→        if (taxMode === 'incl') {
+    73→          const baseRate = r / (1 + GST_RATE);
+    74→          newItems[index].baseRate = baseRate.toFixed(2);
+    75→          newItems[index].cgst = (baseRate * CGST_RATE * q).toFixed(2);
+    76→          newItems[index].sgst = (baseRate * SGST_RATE * q).toFixed(2);
+    77→          newItems[index].amount = (r * q).toFixed(2);
+    78→        } else {
+    79→          const baseRate = r;
+    80→          newItems[index].baseRate = baseRate.toFixed(2);
+    81→          newItems[index].cgst = (baseRate * CGST_RATE * q).toFixed(2);
+    82→          newItems[index].sgst = (baseRate * SGST_RATE * q).toFixed(2);
+    83→          newItems[index].amount = (baseRate * (1 + GST_RATE) * q).toFixed(2);
+    84→        }
+    85→      } else {
+    86→        newItems[index].baseRate = r.toFixed(2);
+    87→        newItems[index].cgst = '0';
+    88→        newItems[index].sgst = '0';
+    89→        newItems[index].amount = (q * r).toFixed(2);
+    90→      }
+    91→    }
+    92→    setItems(newItems);
+    93→  };
+    94→
+    95→  const addItem = () => setItems([...items, {
+    96→    description: '', quantity: '1', rate: '0', amount: '0',
+    97→    itemName: '', taxMode: 'excl', cgst: '0', sgst: '0', baseRate: '0',
+    98→  }]);
+    99→  const removeItem = (i: number) => { if (items.length > 1) setItems(items.filter((_, idx) => idx !== i)); };
+   100→
+   101→  const subtotal = items.reduce((sum, item) => sum + (parseFloat(item.baseRate || item.rate) * (parseFloat(item.quantity) || 0)), 0);
+   102→  const totalCgst = items.reduce((sum, item) => sum + (parseFloat(item.cgst) || 0), 0);
+   103→  const totalSgst = items.reduce((sum, item) => sum + (parseFloat(item.sgst) || 0), 0);
+   104→  const totalGst = totalCgst + totalSgst;
+   105→  const discountAmt = parseFloat(form.discount) || 0;
+   106→  const total = billType === 'gst'
+   107→    ? subtotal + totalGst - discountAmt
+   108→    : items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0) - discountAmt;
+   109→
+   110→  const handleSubmit = async () => {
+   111→    let clientId = form.clientId;
+   112→
+   113→    // If new client, create client first
+   114→    if (clientMode === 'new') {
+   115→      if (!form.newClientName || !form.newClientPhone) return;
+   116→      try {
+   117→        const cRes = await fetch('/api/clients', {
+   118→          method: 'POST',
+   119→          headers: { 'Content-Type': 'application/json' },
+   120→          body: JSON.stringify({
+   121→            businessId,
+   122→            name: form.newClientName,
+   123→            phone: form.newClientPhone,
+   124→            address: form.newClientAddress || null,
+   125→            email: form.newClientEmail || null,
+   126→            company: form.newClientCompany || null,
+   127→          }),
+   128→        });
+   129→        const newClient = await cRes.json();
+   130→        clientId = newClient.id;
+   131→      } catch (err) { console.error(err); return; }
+   132→    }
+   133→
+   134→    if (!clientId || !form.billNumber || !form.dueDate) return;
+   135→
+   136→    try {
+   137→      await fetch('/api/bills', {
+   138→        method: 'POST',
+   139→        headers: { 'Content-Type': 'application/json' },
+   140→        body: JSON.stringify({
+   141→          businessId,
+   142→          clientId,
+   143→          billNumber: form.billNumber,
+   144→          date: form.date,
+   145→          dueDate: form.dueDate,
+   146→          subtotal: billType === 'gst' ? subtotal : items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0),
+   147→          tax: totalGst,
+   148→          discount: discountAmt,
+   149→          total,
+   150→          notes: form.notes,
+   151→          billType,
+   152→          clientGst: billType === 'gst' ? form.clientGst : null,
+   153→          clientAddress: form.clientAddress || null,
+   154→          items: items.map(i => ({
+   155→            description: i.description,
+   156→            quantity: parseFloat(i.quantity) || 0,
+   157→            rate: parseFloat(i.rate) || 0,
+   158→            amount: parseFloat(i.amount) || 0,
+   159→            itemName: i.itemName,
+   160→            taxMode: i.taxMode,
+   161→            cgst: parseFloat(i.cgst) || 0,
+   162→            sgst: parseFloat(i.sgst) || 0,
+   163→            baseRate: parseFloat(i.baseRate) || 0,
+   164→          })),
+   165→        }),
+   166→      });
+   167→      setDialogOpen(false);
+   168→      resetForm();
+   169→      fetchData();
+   170→    } catch (err) { console.error(err); }
+   171→  };
+   172→
+   173→  const resetForm = () => {
+   174→    setForm({
+   175→      clientId: '', billNumber: '', date: new Date().toISOString().split('T')[0],
+   176→      dueDate: '', discount: '0', notes: '', clientGst: '', clientAddress: '',
+   177→      newClientName: '', newClientPhone: '', newClientAddress: '', newClientEmail: '', newClientCompany: '',
+   178→    });
+   179→    setItems([{ description: '', quantity: '1', rate: '0', amount: '0', itemName: '', taxMode: 'excl', cgst: '0', sgst: '0', baseRate: '0' }]);
+   180→    setBillType('non_gst');
+   181→    setClientMode('existing');
+   182→  };
+   183→
+   184→  const handleDelete = async (id: string) => {
+   185→    if (!confirm('Delete this bill?')) return;
+   186→    await fetch(`/api/bills?id=${id}`, { method: 'DELETE' });
+   187→    fetchData();
+   188→  };
+   189→
+   190→  const statusColor = (s: string) => {
+   191→    switch (s) { case 'paid': return 'bg-green-100 text-green-700'; case 'partial': return 'bg-yellow-100 text-yellow-700'; default: return 'bg-red-100 text-red-700'; }
+   192→  };
+   193→
+   194→  const nextBillNum = () => {
+   195→    const num = bills.length > 0 ? Math.max(...bills.map(b => parseInt(b.billNumber.replace(/\D/g, '')) || 0)) + 1 : 1;
+   196→    return `${String(num).padStart(3, '0')}`;
+   197→  };
+   198→
+   199→  const handleBillTypeChange = (type: 'gst' | 'non_gst') => {
+   200→    setBillType(type);
+   201→    const newItems = items.map(item => {
+   202→      const q = parseFloat(item.quantity) || 0;
+   203→      const r = parseFloat(item.rate) || 0;
+   204→      if (type === 'gst') {
+   205→        const baseRate = item.taxMode === 'incl' ? r / (1 + GST_RATE) : r;
+   206→        return {
+   207→          ...item,
+   208→          baseRate: baseRate.toFixed(2),
+   209→          cgst: (baseRate * CGST_RATE * q).toFixed(2),
+   210→          sgst: (baseRate * SGST_RATE * q).toFixed(2),
+   211→          amount: item.taxMode === 'incl' ? (r * q).toFixed(2) : (baseRate * (1 + GST_RATE) * q).toFixed(2),
+   212→        };
+   213→      } else {
+   214→        return { ...item, baseRate: r.toFixed(2), cgst: '0', sgst: '0', amount: (q * r).toFixed(2) };
+   215→      }
+   216→    });
+   217→    setItems(newItems);
+   218→  };
+   219→
+   220→  // When existing client selected, auto-fill address
+   221→  const handleClientSelect = (clientId: string) => {
+   222→    const client = clients.find(c => c.id === clientId);
+   223→    setForm({ ...form, clientId, clientAddress: client?.address || '' });
+   224→  };
+   225→
+   226→  return (
+   227→    <div className="p-3 md:p-6 space-y-4">
+   228→      <div className="flex items-center justify-between">
+   229→        <div>
+   230→          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Bills</h2>
+   231→          <p className="text-sm text-gray-500 dark:text-gray-400">{bills.length} bills</p>
+   232→        </div>
+   233→        <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+   234→          <DialogTrigger asChild>
+   235→            <Button className="gap-1.5 bg-blue-600 hover:bg-blue-700 min-h-[44px]" onClick={() => setForm(f => ({ ...f, billNumber: nextBillNum() }))}>
+   236→              <Plus className="h-4 w-4" /> New Bill
+   237→            </Button>
+   238→          </DialogTrigger>
+   239→          <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
+   240→            <DialogHeader><DialogTitle>Create New Bill</DialogTitle></DialogHeader>
+   241→            <div className="space-y-4 pt-2">
+   242→              {/* Step 1: Bill Type */}
+   243→              <div>
+   244→                <Label className="text-sm font-semibold mb-2 block">Step 1: Bill Type</Label>
+   245→                <div className="grid grid-cols-2 gap-3">
+   246→                  <button
+   247→                    type="button"
+   248→                    onClick={() => handleBillTypeChange('gst')}
+   249→                    className={`p-4 rounded-xl border-2 transition-all text-center min-h-[80px] ${
+   250→                      billType === 'gst'
+   251→                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-600'
+   252→                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
+   253→                    }`}
+   254→                  >
+   255→                    <FileCheck className="h-6 w-6 mx-auto mb-1" />
+   256→                    <p className="font-bold text-sm">GST Bill</p>
+   257→                    <p className="text-[11px] mt-0.5">CGST + SGST (18%)</p>
+   258→                  </button>
+   259→                  <button
+   260→                    type="button"
+   261→                    onClick={() => handleBillTypeChange('non_gst')}
+   262→                    className={`p-4 rounded-xl border-2 transition-all text-center min-h-[80px] ${
+   263→                      billType === 'non_gst'
+   264→                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-600'
+   265→                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
+   266→                    }`}
+   267→                  >
+   268→                    <FileMinus className="h-6 w-6 mx-auto mb-1" />
+   269→                    <p className="font-bold text-sm">Non-GST Bill</p>
+   270→                    <p className="text-[11px] mt-0.5">Without GST</p>
+   271→                  </button>
+   272→                </div>
+   273→              </div>
+   274→
+   275→              {/* Step 2: Client Selection */}
+   276→              <div>
+   277→                <Label className="text-sm font-semibold mb-2 block">Step 2: Client</Label>
+   278→                <div className="grid grid-cols-2 gap-3 mb-3">
+   279→                  <button
+   280→                    type="button"
+   281→                    onClick={() => setClientMode('existing')}
+   282→                    className={`p-3 rounded-xl border-2 transition-all text-center min-h-[64px] ${
+   283→                      clientMode === 'existing'
+   284→                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-600'
+   285→                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
+   286→                    }`}
+   287→                  >
+   288→                    <UserCheck className="h-5 w-5 mx-auto mb-1" />
+   289→                    <p className="font-semibold text-xs">Existing Client</p>
+   290→                  </button>
+   291→                  <button
+   292→                    type="button"
+   293→                    onClick={() => setClientMode('new')}
+   294→                    className={`p-3 rounded-xl border-2 transition-all text-center min-h-[64px] ${
+   295→                      clientMode === 'new'
+   296→                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-600'
+   297→                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
+   298→                    }`}
+   299→                  >
+   300→                    <UserPlus className="h-5 w-5 mx-auto mb-1" />
+   301→                    <p className="font-semibold text-xs">New Client</p>
+   302→                  </button>
+   303→                </div>
+   304→
+   305→                {clientMode === 'existing' ? (
+   306→                  <div className="space-y-3">
+   307→                    <Select value={form.clientId} onValueChange={handleClientSelect}>
+   308→                      <SelectTrigger className="min-h-[44px]"><SelectValue placeholder="Select existing client..." /></SelectTrigger>
+   309→                      <SelectContent>
+   310→                        {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}{c.company ? ` (${c.company})` : ''} - {c.phone}</SelectItem>)}
+   311→                      </SelectContent>
+   312→                    </Select>
+   313→                    {form.clientId && (() => {
+   314→                      const sel = clients.find(c => c.id === form.clientId);
+   315→                      return sel ? (
+   316→                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs space-y-1">
+   317→                          <p><span className="text-gray-500">Name:</span> <span className="font-medium">{sel.name}</span></p>
+   318→                          <p><span className="text-gray-500">Phone:</span> {sel.phone}</p>
+   319→                          {sel.address && <p><span className="text-gray-500">Address:</span> {sel.address}</p>}
+   320→                          {sel.email && <p><span className="text-gray-500">Email:</span> {sel.email}</p>}
+   321→                          {sel.company && <p><span className="text-gray-500">Company:</span> {sel.company}</p>}
+   322→                        </div>
+   323→                      ) : null;
+   324→                    })()}
+   325→                  </div>
+   326→                ) : (
+   327→                  <div className="space-y-3 p-3 bg-blue-50/50 dark:bg-blue-950/30 rounded-lg border border-blue-100 dark:border-blue-800">
+   328→                    <div className="grid grid-cols-2 gap-3">
+   329→                      <div>
+   330→                        <Label className="text-xs">Client Name *</Label>
+   331→                        <Input placeholder="Full name" value={form.newClientName} onChange={(e) => setForm({ ...form, newClientName: e.target.value })} className="min-h-[44px]" />
+   332→                      </div>
+   333→                      <div>
+   334→                        <Label className="text-xs">Phone Number *</Label>
+   335→                        <Input placeholder="Phone" value={form.newClientPhone} onChange={(e) => setForm({ ...form, newClientPhone: e.target.value })} className="min-h-[44px]" />
+   336→                      </div>
+   337→                    </div>
+   338→                    <div className="grid grid-cols-2 gap-3">
+   339→                      <div>
+   340→                        <Label className="text-xs">Address</Label>
+   341→                        <Input placeholder="Address" value={form.newClientAddress} onChange={(e) => setForm({ ...form, newClientAddress: e.target.value, clientAddress: e.target.value })} className="min-h-[44px]" />
+   342→                      </div>
+   343→                      <div>
+   344→                        <Label className="text-xs">Email</Label>
+   345→                        <Input placeholder="Email" value={form.newClientEmail} onChange={(e) => setForm({ ...form, newClientEmail: e.target.value })} className="min-h-[44px]" />
+   346→                      </div>
+   347→                    </div>
+   348→                    <div>
+   349→                      <Label className="text-xs">Company</Label>
+   350→                      <Input placeholder="Company name" value={form.newClientCompany} onChange={(e) => setForm({ ...form, newClientCompany: e.target.value })} className="min-h-[44px]" />
+   351→                    </div>
+   352→                  </div>
+   353→                )}
+   354→              </div>
+   355→
+   356→              {/* GST-specific fields */}
+   357→              {billType === 'gst' && (
+   358→                <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+   359→                  <div>
+   360→                    <Label className="text-xs">Client GSTIN</Label>
+   361→                    <Input value={form.clientGst} onChange={(e) => setForm({ ...form, clientGst: e.target.value.toUpperCase() })} placeholder="e.g. 19XXXXX1234F1ZG" className="uppercase min-h-[44px]" />
+   362→                  </div>
+   363→                  <div>
+   364→                    <Label className="text-xs">Billing Address</Label>
+   365→                    <Input value={form.clientAddress} onChange={(e) => setForm({ ...form, clientAddress: e.target.value })} placeholder="Billing address" className="min-h-[44px]" />
+   366→                  </div>
+   367→                </div>
+   368→              )}
+   369→
+   370→              {/* Bill Details */}
+   371→              <div className="grid grid-cols-3 gap-3">
+   372→                <div><Label className="text-xs">Bill # *</Label><Input value={form.billNumber} onChange={(e) => setForm({ ...form, billNumber: e.target.value })} className="min-h-[44px]" /></div>
+   373→                <div><Label className="text-xs">Date</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="min-h-[44px]" /></div>
+   374→                <div><Label className="text-xs">Due Date *</Label><Input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className="min-h-[44px]" /></div>
+   375→              </div>
+   376→
+   377→              {/* Items */}
+   378→              <div>
+   379→                <Label className="text-sm font-semibold">Step 3: Items</Label>
+   380→                <div className="space-y-2 mt-2">
+   381→                  {items.map((item, i) => (
+   382→                    <div key={i} className={`p-3 rounded-lg border ${billType === 'gst' ? 'border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50'}`}>
+   383→                      {/* Mobile: stack layout, Desktop: grid */}
+   384→                      <div className="grid grid-cols-2 md:grid-cols-12 gap-2 items-end">
+   385→                        <div className="col-span-2 md:col-span-2">
+   386→                          <Label className="text-[10px]">Item Name</Label>
+   387→                          <Input placeholder="Item" value={item.itemName} onChange={(e) => updateItem(i, 'itemName', e.target.value)} className="h-10 text-sm" />
+   388→                        </div>
+   389→                        <div className="col-span-2 md:col-span-3">
+   390→                          <Label className="text-[10px]">Description</Label>
+   391→                          <Input placeholder="Description" value={item.description} onChange={(e) => updateItem(i, 'description', e.target.value)} className="h-10 text-sm" />
+   392→                        </div>
+   393→                        <div className="col-span-1 md:col-span-2">
+   394→                          <Label className="text-[10px]">Rate (₹)</Label>
+   395→                          <Input type="number" step="0.01" placeholder="Rate" value={item.rate} onChange={(e) => updateItem(i, 'rate', e.target.value)} className="h-10 text-sm" />
+   396→                        </div>
+   397→                        <div className="col-span-1 md:col-span-1">
+   398→                          <Label className="text-[10px]">Qty</Label>
+   399→                          <Input type="number" placeholder="Qty" value={item.quantity} onChange={(e) => updateItem(i, 'quantity', e.target.value)} className="h-10 text-sm" />
+   400→                        </div>
+   401→                        {billType === 'gst' && (
+   402→                          <div className="col-span-2 md:col-span-2">
+   403→                            <Label className="text-[10px]">Tax Mode</Label>
+   404→                            <Select value={item.taxMode} onValueChange={(v) => updateItem(i, 'taxMode', v)}>
+   405→                              <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
+   406→                              <SelectContent>
+   407→                                <SelectItem value="excl">Excl. GST</SelectItem>
+   408→                                <SelectItem value="incl">Incl. GST</SelectItem>
+   409→                              </SelectContent>
+   410→                            </Select>
+   411→                          </div>
+   412→                        )}
+   413→                        <div className="col-span-1 md:col-span-1">
+   414→                          <Label className="text-[10px]">Total</Label>
+   415→                          <Input readOnly value={item.amount} className="h-10 text-sm bg-white dark:bg-gray-900" />
+   416→                        </div>
+   417→                        <div className="col-span-1 md:col-span-1 flex items-end">
+   418→                          <Button variant="ghost" size="icon" onClick={() => removeItem(i)} className="h-10 w-10 min-w-[44px]">
+   419→                            <Trash2 className="h-4 w-4 text-red-400" />
+   420→                          </Button>
+   421→                        </div>
+   422→                      </div>
+   423→                      {billType === 'gst' && parseFloat(item.rate) > 0 && (
+   424→                        <div className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 flex gap-3">
+   425→                          <span>Base: ₹{parseFloat(item.baseRate).toFixed(2)}</span>
+   426→                          <span>CGST: ₹{item.cgst}</span>
+   427→                          <span>SGST: ₹{item.sgst}</span>
+   428→                        </div>
+   429→                      )}
+   430→                    </div>
+   431→                  ))}
+   432→                </div>
+   433→                <Button variant="outline" size="sm" onClick={addItem} className="mt-2 gap-1 min-h-[40px]"><Plus className="h-3 w-3" /> Add Item</Button>
+   434→              </div>
+   435→
+   436→              <div className="grid grid-cols-2 gap-3">
+   437→                <div><Label className="text-xs">Discount (₹)</Label><Input type="number" value={form.discount} onChange={(e) => setForm({ ...form, discount: e.target.value })} className="min-h-[44px]" /></div>
+   438→                <div><Label className="text-xs">Notes</Label><Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Notes..." className="min-h-[44px]" /></div>
+   439→              </div>
+   440→
+   441→              {/* Summary */}
+   442→              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-1">
+   443→                {billType === 'gst' ? (
+   444→                  <>
+   445→                    <div className="flex justify-between text-sm"><span>Taxable Amount:</span><span>{fmt(subtotal)}</span></div>
+   446→                    <div className="flex justify-between text-sm"><span>CGST (9%):</span><span>{fmt(totalCgst)}</span></div>
+   447→                    <div className="flex justify-between text-sm"><span>SGST (9%):</span><span>{fmt(totalSgst)}</span></div>
+   448→                    {discountAmt > 0 && <div className="flex justify-between text-sm"><span>Discount:</span><span>-{fmt(discountAmt)}</span></div>}
+   449→                    <div className="flex justify-between font-bold text-lg border-t pt-1 mt-1 dark:border-gray-700"><span>Grand Total:</span><span>{fmt(total)}</span></div>
+   450→                  </>
+   451→                ) : (
+   452→                  <>
+   453→                    <div className="flex justify-between text-sm"><span>Subtotal:</span><span>{fmt(items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0))}</span></div>
+   454→                    {discountAmt > 0 && <div className="flex justify-between text-sm"><span>Discount:</span><span>-{fmt(discountAmt)}</span></div>}
+   455→                    <div className="flex justify-between font-bold text-lg border-t pt-1 mt-1 dark:border-gray-700"><span>Total:</span><span>{fmt(total)}</span></div>
+   456→                  </>
+   457→                )}
+   458→              </div>
+   459→
+   460→              <Button onClick={handleSubmit} className="w-full bg-blue-600 hover:bg-blue-700 min-h-[48px] text-base font-semibold"
+   461→                disabled={!form.billNumber || !form.dueDate || (clientMode === 'existing' ? !form.clientId : !form.newClientName || !form.newClientPhone)}>
+   462→                {billType === 'gst' ? 'Create GST Invoice' : 'Create Bill'}
+   463→              </Button>
+   464→            </div>
+   465→          </DialogContent>
+   466→        </Dialog>
+   467→      </div>
+   468→
+   469→      {loading ? <div className="text-center py-8 text-gray-400">Loading...</div> : bills.length === 0 ? (
+   470→        <Card className="p-8 text-center">
+   471→          <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+   472→          <p className="text-gray-500">No bills yet</p>
+   473→        </Card>
+   474→      ) : (
+   475→        <div className="space-y-2">
+   476→          {bills.map((bill) => (
+   477→            <Card key={bill.id} className="p-4 hover:shadow-md transition-shadow active:scale-[0.98]">
+   478→              <div className="flex items-center justify-between">
+   479→                <div className="flex items-center gap-3 min-w-0">
+   480→                  <div className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${
+   481→                    bill.billType === 'gst' ? 'bg-blue-50 dark:bg-blue-950' : 'bg-gray-50 dark:bg-gray-800'
+   482→                  }`}>
+   483→                    <FileText className={`h-5 w-5 ${bill.billType === 'gst' ? 'text-blue-500' : 'text-gray-500'}`} />
+   484→                  </div>
+   485→                  <div className="min-w-0">
+   486→                    <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+   487→                      {bill.billNumber}
+   488→                      {bill.billType === 'gst' && <Badge className="ml-2 text-[9px] bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">GST</Badge>}
+   489→                    </p>
+   490→                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{bill.client.name} • {new Date(bill.date).toLocaleDateString('en-IN')}</p>
+   491→                  </div>
+   492→                </div>
+   493→                <div className="flex items-center gap-2 shrink-0">
+   494→                  <div className="text-right">
+   495→                    <p className="font-bold text-gray-900 dark:text-gray-100">{fmt(bill.total)}</p>
+   496→                    <Badge className={`text-[10px] ${statusColor(bill.status)}`}>
+   497→                      {bill.status === 'paid' ? 'Paid' : bill.status === 'partial' ? 'Partial' : 'Unpaid'}
+   498→                    </Badge>
+   499→                  </div>
+   500→                  <button onClick={() => setViewBill(bill)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg min-w-[44px] min-h-[44px] flex items-center justify-center">
+   501→                    <Eye className="h-4 w-4 text-gray-400" />
+   502→                  </button>
+   503→                </div>
+   504→              </div>
+   505→            </Card>
+   506→          ))}
+   507→        </div>
+   508→      )}
+   509→
+   510→      {viewBill && <InvoicePreview bill={viewBill} onClose={() => setViewBill(null)} />}
+   511→    </div>
+   512→  );
+   513→}
+   514→
