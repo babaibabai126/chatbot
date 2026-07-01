@@ -1,0 +1,850 @@
+     1→import { NextRequest, NextResponse } from 'next/server';
+     2→import { db } from '@/lib/db';
+     3→
+     4→// ─── System Prompt ──────────────────────────────────────────────────────
+     5→const SYSTEM_PROMPT = `You are the AI assistant for "AAROHAN BUSINESS HUB" - a multi-business management platform.
+     6→
+     7→Business Details:
+     8→1. AAROHAN TECH SOLUTIONS (Marketing Agency)
+     9→   - GST NO: 19MKIPS8902F1ZG
+    10→   - Address: 24/27 A.K.M ROAD, BARANAGAR, KOLKATA - 700090
+    11→   - Contact: 6290717007 | contact@aarohantechsolutions.in
+    12→
+    13→Rules:
+    14→1. Respond in Bengali + English (bilingual)
+    15→2. Use ₹ (INR) for all monetary amounts
+    16→3. GST: CGST 9% + SGST 9% = 18% total
+    17→4. Be concise and friendly
+    18→5. When actions are already executed, confirm the results naturally`;
+    19→
+    20→// ─── Gemini API ─────────────────────────────────────────────────────────
+    21→const GEMINI_FUNCTIONS = [
+    22→  {
+    23→    name: 'create_bill',
+    24→    description: 'Create a new bill/invoice for a client.',
+    25→    parameters: {
+    26→      type: 'OBJECT',
+    27→      properties: {
+    28→        clientName: { type: 'STRING', description: 'Client name' },
+    29→        clientPhone: { type: 'STRING', description: 'Client phone (optional)' },
+    30→        clientAddress: { type: 'STRING', description: 'Client address (optional)' },
+    31→        clientGst: { type: 'STRING', description: 'Client GST number (optional)' },
+    32→        billType: { type: 'STRING', enum: ['gst', 'non_gst'], description: 'Bill type' },
+    33→        items: {
+    34→          type: 'ARRAY',
+    35→          items: {
+    36→            type: 'OBJECT',
+    37→            properties: {
+    38→              itemName: { type: 'STRING', description: 'Item name' },
+    39→              quantity: { type: 'NUMBER', description: 'Quantity' },
+    40→              rate: { type: 'NUMBER', description: 'Rate in INR' },
+    41→              taxMode: { type: 'STRING', enum: ['excl', 'incl'], description: 'Tax mode' },
+    42→            },
+    43→            required: ['itemName', 'rate'],
+    44→          },
+    45→        },
+    46→        notes: { type: 'STRING', description: 'Notes (optional)' },
+    47→      },
+    48→      required: ['billType', 'items'],
+    49→    },
+    50→  },
+    51→  {
+    52→    name: 'create_client',
+    53→    description: 'Add a new client.',
+    54→    parameters: {
+    55→      type: 'OBJECT',
+    56→      properties: {
+    57→        name: { type: 'STRING', description: 'Client name' },
+    58→        phone: { type: 'STRING', description: 'Phone number' },
+    59→        email: { type: 'STRING', description: 'Email (optional)' },
+    60→        address: { type: 'STRING', description: 'Address (optional)' },
+    61→        company: { type: 'STRING', description: 'Company (optional)' },
+    62→      },
+    63→      required: ['name', 'phone'],
+    64→    },
+    65→  },
+    66→  {
+    67→    name: 'create_expense',
+    68→    description: 'Record an expense.',
+    69→    parameters: {
+    70→      type: 'OBJECT',
+    71→      properties: {
+    72→        category: { type: 'STRING', description: 'Category' },
+    73→        description: { type: 'STRING', description: 'Description' },
+    74→        amount: { type: 'NUMBER', description: 'Amount in INR' },
+    75→        paymentMethod: { type: 'STRING', enum: ['Cash', 'bKash', 'Bank Transfer', 'UPI', 'Card', 'Other'], description: 'Payment method' },
+    76→      },
+    77→      required: ['category', 'description', 'amount'],
+    78→    },
+    79→  },
+    80→  {
+    81→    name: 'record_payment',
+    82→    description: 'Record a payment from a client.',
+    83→    parameters: {
+    84→      type: 'OBJECT',
+    85→      properties: {
+    86→        clientName: { type: 'STRING', description: 'Client name' },
+    87→        amount: { type: 'NUMBER', description: 'Amount in INR' },
+    88→        paymentMethod: { type: 'STRING', enum: ['Cash', 'bKash', 'Bank Transfer', 'UPI', 'Card', 'Other'], description: 'Payment method' },
+    89→      },
+    90→      required: ['clientName', 'amount', 'paymentMethod'],
+    91→    },
+    92→  },
+    93→  {
+    94→    name: 'get_dues',
+    95→    description: 'Get unpaid bills and dues.',
+    96→    parameters: { type: 'OBJECT', properties: { filter: { type: 'STRING', enum: ['all', 'overdue', 'upcoming'] } } },
+    97→  },
+    98→  {
+    99→    name: 'get_dashboard',
+   100→    description: 'Get business dashboard summary.',
+   101→    parameters: { type: 'OBJECT', properties: { period: { type: 'STRING', enum: ['today', 'week', 'month', 'year', 'all'] } } },
+   102→  },
+   103→  {
+   104→    name: 'list_clients',
+   105→    description: 'List clients.',
+   106→    parameters: { type: 'OBJECT', properties: { search: { type: 'STRING' } } },
+   107→  },
+   108→  {
+   109→    name: 'list_bills',
+   110→    description: 'List bills.',
+   111→    parameters: { type: 'OBJECT', properties: { status: { type: 'STRING', enum: ['all', 'paid', 'unpaid', 'partial'] }, limit: { type: 'NUMBER' } } },
+   112→  },
+   113→];
+   114→
+   115→// ─── Conversation Store ─────────────────────────────────────────────────
+   116→const conversations = new Map<string, Array<{ role: string; content: string }>>();
+   117→
+   118→// ─── Gemini with Function Calling ───────────────────────────────────────
+   119→async function callGemini(
+   120→  messages: Array<{ role: string; content: string }>,
+   121→  useTools: boolean = true
+   122→): Promise<{ text: string | null; functionCall: { name: string; args: Record<string, unknown> } | null }> {
+   123→  const apiKey = process.env.GEMINI_API_KEY;
+   124→  if (!apiKey) return { text: null, functionCall: null };
+   125→
+   126→  try {
+   127→    const contents = [];
+   128→    for (let i = 1; i < messages.length; i++) {
+   129→      const m = messages[i];
+   130→      if (m.role === 'user') {
+   131→        contents.push({ role: 'user', parts: [{ text: m.content }] });
+   132→      } else if (m.role === 'assistant') {
+   133→        contents.push({ role: 'model', parts: [{ text: m.content }] });
+   134→      } else if (m.role === 'function_response') {
+   135→        const parts = m.content.split('|||');
+   136→        contents.push({
+   137→          role: 'function',
+   138→          parts: [{ functionResponse: { name: parts[0] || 'unknown', response: { result: parts[1] || '' } } }],
+   139→        });
+   140→      } else if (m.role === 'function_call') {
+   141→        contents.push({ role: 'model', parts: [{ functionCall: JSON.parse(m.content) }] });
+   142→      }
+   143→    }
+   144→
+   145→    if (contents.length === 0) return { text: null, functionCall: null };
+   146→
+   147→    const body: Record<string, unknown> = {
+   148→      contents,
+   149→      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+   150→      generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+   151→    };
+   152→
+   153→    if (useTools) {
+   154→      body.tools = [{ functionDeclarations: GEMINI_FUNCTIONS }];
+   155→    }
+   156→
+   157→    const controller = new AbortController();
+   158→    const timeout = setTimeout(() => controller.abort(), 25000);
+   159→
+   160→    const response = await fetch(
+   161→      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+   162→      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal }
+   163→    );
+   164→
+   165→    clearTimeout(timeout);
+   166→    if (!response.ok) {
+   167→      const errText = await response.text().catch(() => '');
+   168→      console.error('[Chat] Gemini HTTP error:', response.status, errText.substring(0, 200));
+   169→      return { text: null, functionCall: null };
+   170→    }
+   171→
+   172→    const data = await response.json();
+   173→    const candidate = data?.candidates?.[0];
+   174→    if (!candidate?.content?.parts) return { text: null, functionCall: null };
+   175→
+   176→    let textResult: string | null = null;
+   177→    let fcResult: { name: string; args: Record<string, unknown> } | null = null;
+   178→
+   179→    for (const part of candidate.content.parts) {
+   180→      if (part.text) textResult = (textResult || '') + part.text;
+   181→      if (part.functionCall) fcResult = { name: part.functionCall.name, args: part.functionCall.args || {} };
+   182→    }
+   183→
+   184→    return { text: textResult, functionCall: fcResult };
+   185→  } catch (err) {
+   186→    console.error('[Chat] Gemini exception:', err);
+   187→    return { text: null, functionCall: null };
+   188→  }
+   189→}
+   190→
+   191→// ─── ZAI SDK Fallback ───────────────────────────────────────────────────
+   192→let zaiInstance: any = null;
+   193→let zaiInitPromise: Promise<any> | null = null;
+   194→
+   195→async function getZAI(): Promise<any> {
+   196→  if (zaiInstance) return zaiInstance;
+   197→  if (zaiInitPromise) return zaiInitPromise;
+   198→  zaiInitPromise = (async () => {
+   199→    try {
+   200→      const ZAI = (await import('z-ai-web-dev-sdk')).default;
+   201→      zaiInstance = await ZAI.create();
+   202→      return zaiInstance;
+   203→    } catch { zaiInitPromise = null; return null; }
+   204→  })();
+   205→  return zaiInitPromise;
+   206→}
+   207→
+   208→async function callZAIForResponse(prompt: string, actionResult: string): Promise<string | null> {
+   209→  try {
+   210→    const zai = await getZAI();
+   211→    if (!zai) return null;
+   212→    const response = await zai.chat.completions.create({
+   213→      messages: [
+   214→        { role: 'system', content: SYSTEM_PROMPT },
+   215→        { role: 'user', content: prompt },
+   216→        { role: 'assistant', content: actionResult },
+   217→        { role: 'user', content: 'Please rewrite this in a friendly bilingual (Bengali + English) format. Keep it concise.' },
+   218→      ],
+   219→      thinking: { type: 'disabled' },
+   220→    });
+   221→    return response?.choices?.[0]?.message?.content || null;
+   222→  } catch { return null; }
+   223→}
+   224→
+   225→// ═══════════════════════════════════════════════════════════════════════════
+   226→// ─── INTENT DETECTION (works WITHOUT LLM) ──────────────────────────────
+   227→// ═══════════════════════════════════════════════════════════════════════════
+   228→
+   229→interface DetectedIntent {
+   230→  action: string;
+   231→  args: Record<string, unknown>;
+   232→  confidence: number;
+   233→}
+   234→
+   235→function detectIntent(message: string): DetectedIntent | null {
+   236→  const lower = message.toLowerCase().trim();
+   237→
+   238→  // ── Create Bill / Invoice ──
+   239→  if (lower.match(/(create|make|generate|নতুন|তৈরি)\s*(an?\s*)?(gst\s*)?(bill|invoice|বিল|চালান)/) ||
+   240→      lower.match(/(bill|invoice|বিল|চালান)\s*(create|make|generate|নতুন|তৈরি)/) ||
+   241→      lower.match(/(create|make|generate)\s*(an?\s*)?(gst|non.?gst)\s*(bill|invoice)/)) {
+   242→    const args: Record<string, unknown> = {};
+   243→
+   244→    // Detect bill type
+   245→    if (lower.includes('gst') && !lower.includes('non-gst') && !lower.includes('non gst')) {
+   246→      args.billType = 'gst';
+   247→    } else if (lower.includes('non-gst') || lower.includes('non gst')) {
+   248→      args.billType = 'non_gst';
+   249→    } else if (lower.includes('gst')) {
+   250→      args.billType = 'gst';
+   251→    } else {
+   252→      args.billType = 'non_gst'; // default
+   253→    }
+   254→
+   255→    // Extract amount - look for ₹ or rs or inr patterns
+   256→    const amountMatch = lower.match(/[₹rs\s]*([\d,]+(?:\.\d+)?)/);
+   257→    if (amountMatch) {
+   258→      const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+   259→      if (amount > 0) {
+   260→        // Create a single item with the amount
+   261→        const itemDesc = extractItemDescription(message);
+   262→        args.items = [{ itemName: itemDesc || 'Service', rate: amount, quantity: 1, taxMode: 'excl' }];
+   263→      }
+   264→    }
+   265→
+   266→    // Extract client name
+   267→    const clientName = extractClientName(message);
+   268→    if (clientName) args.clientName = clientName;
+   269→
+   270→    return { action: 'create_bill', args, confidence: 0.9 };
+   271→  }
+   272→
+   273→  // ── Add / Create Client ──
+   274→  if (lower.match(/(add|create|নতুন|যোগ|তৈরি)\s*(an?\s*)?(new\s*)?(client|customer|ক্লায়েন্ট|গ্রাহক)/) ||
+   275→      lower.match(/(client|customer|ক্লায়েন্ট|গ্রাহক)\s*(add|create|নতুন|যোগ|তৈরি)/)) {
+   276→    const args: Record<string, unknown> = {};
+   277→
+   278→    // Extract name - look for "named X", "name X", "নাম X"
+   279→    const nameMatch = message.match(/(?:named?|name[d]?\s*(?:is)?|নাম)\s*:?\s*([A-Za-z\s]+?)(?:\s*[,;.]|\s*(?:phone|ফোন|email|address|with)|$)/i);
+   280→    if (nameMatch) args.name = nameMatch[1].trim();
+   281→
+   282→    // Extract phone
+   283→    const phoneMatch = message.match(/(?:phone|mobile|number|ফোন|নম্বর)\s*:?\s*([\d+\-\s]{8,15})/i);
+   284→    if (phoneMatch) args.phone = phoneMatch[1].trim().replace(/\s/g, '');
+   285→
+   286→    // Extract email
+   287→    const emailMatch = message.match(/[\w.-]+@[\w.-]+\.\w+/);
+   288→    if (emailMatch) args.email = emailMatch[0];
+   289→
+   290→    return { action: 'create_client', args, confidence: 0.9 };
+   291→  }
+   292→
+   293→  // ── Add / Record Expense ──
+   294→  if (lower.match(/(add|record|log|create|যোগ|রেকর্ড|খরচ)\s*(an?\s*)?(new\s*)?(expense|খরচ|expenditure)/) ||
+   295→      lower.match(/(expense|খরচ)\s*(add|record|log|create|যোগ|রেকর্ড)/)) {
+   296→    const args: Record<string, unknown> = {};
+   297→
+   298→    // Extract amount
+   299→    const amountMatch = lower.match(/[₹rs\s]*([\d,]+(?:\.\d+)?)/);
+   300→    if (amountMatch) args.amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+   301→
+   302→    // Extract category
+   303→    const categories = ['rent', 'salary', 'travel', 'food', 'internet', 'marketing', 'software', 'utilities', 'office', 'transport', 'miscellaneous'];
+   304→    for (const cat of categories) {
+   305→      if (lower.includes(cat)) { args.category = cat.charAt(0).toUpperCase() + cat.slice(1); break; }
+   306→    }
+   307→    if (!args.category) args.category = 'Miscellaneous';
+   308→
+   309→    // Extract payment method
+   310→    if (lower.includes('cash')) args.paymentMethod = 'Cash';
+   311→    else if (lower.includes('bkash')) args.paymentMethod = 'bKash';
+   312→    else if (lower.includes('bank')) args.paymentMethod = 'Bank Transfer';
+   313→    else if (lower.includes('upi')) args.paymentMethod = 'UPI';
+   314→    else if (lower.includes('card')) args.paymentMethod = 'Card';
+   315→
+   316→    // Description from the message
+   317→    args.description = message.replace(/[₹₹]/g, '').substring(0, 100);
+   318→
+   319→    return { action: 'create_expense', args, confidence: 0.85 };
+   320→  }
+   321→
+   322→  // ── Record Payment ──
+   323→  if (lower.match(/(record|received?|got|পেয়েছি|পেলাম|জমা)\s*(an?\s*)?(payment|পেমেন্ট|টাকা)/) ||
+   324→      lower.match(/(payment|পেমেন্ট)\s*(received?|from|record|জমা)/)) {
+   325→    const args: Record<string, unknown> = {};
+   326→
+   327→    const amountMatch = lower.match(/[₹rs\s]*([\d,]+(?:\.\d+)?)/);
+   328→    if (amountMatch) args.amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+   329→
+   330→    const clientName = extractClientName(message);
+   331→    if (clientName) args.clientName = clientName;
+   332→
+   333→    if (lower.includes('cash')) args.paymentMethod = 'Cash';
+   334→    else if (lower.includes('bkash')) args.paymentMethod = 'bKash';
+   335→    else if (lower.includes('bank')) args.paymentMethod = 'Bank Transfer';
+   336→    else if (lower.includes('upi')) args.paymentMethod = 'UPI';
+   337→    else args.paymentMethod = 'Cash';
+   338→
+   339→    return { action: 'record_payment', args, confidence: 0.8 };
+   340→  }
+   341→
+   342→  // ── Get Dues ──
+   343→  if (lower.match(/(show|check|what|list|দেখ|দেখাও|কত)\s*(are\s*)?(my\s*)?(dues|outstanding|unpaid|overdue|বকেয়া|বাকি)/) ||
+   344→      lower.match(/(dues|বকেয়া|বাকি)\s*(show|check|list|দেখ|দেখাও)/) ||
+   345→      lower.includes('dues') || lower.includes('বকেয়া') || lower.includes('বাকি কত')) {
+   346→    const args: Record<string, unknown> = {};
+   347→    if (lower.includes('overdue') || lower.includes('past due')) args.filter = 'overdue';
+   348→    else if (lower.includes('upcoming')) args.filter = 'upcoming';
+   349→    else args.filter = 'all';
+   350→    return { action: 'get_dues', args, confidence: 0.9 };
+   351→  }
+   352→
+   353→  // ── Dashboard / Summary ──
+   354→  if (lower.match(/(dashboard|summary|overview|সারসংক্ষেপ|ওভারভিউ|ড্যাশবোর্ড|how much|কত টাকা|earn|revenue|আয়)/)) {
+   355→    const args: Record<string, unknown> = {};
+   356→    if (lower.includes('today') || lower.includes('আজ')) args.period = 'today';
+   357→    else if (lower.includes('week') || lower.includes('সপ্তাহ')) args.period = 'week';
+   358→    else if (lower.includes('year') || lower.includes('বছর')) args.period = 'year';
+   359→    else args.period = 'month';
+   360→    return { action: 'get_dashboard', args, confidence: 0.85 };
+   361→  }
+   362→
+   363→  // ── List Clients ──
+   364→  if (lower.match(/(show|list|see|দেখ|দেখাও|তালিকা)\s*(all\s*)?(clients?|customers?|ক্লায়েন্ট|গ্রাহক)/) ||
+   365→      lower.match(/(clients?|ক্লায়েন্ট)\s*(show|list|see|দেখ|দেখাও)/) ||
+   366→      lower === 'clients' || lower === 'ক্লায়েন্ট') {
+   367→    return { action: 'list_clients', args: {}, confidence: 0.9 };
+   368→  }
+   369→
+   370→  // ── List Bills ──
+   371→  if (lower.match(/(show|list|see|দেখ|দেখাও|তালিকা)\s*(all\s*)?(bills?|invoices?|বিল|চালান)/) ||
+   372→      lower.match(/(bills?|invoices?|বিল)\s*(show|list|see|দেখ|দেখাও)/) ||
+   373→      lower === 'bills' || lower === 'বিল') {
+   374→    const args: Record<string, unknown> = {};
+   375→    if (lower.includes('paid')) args.status = 'paid';
+   376→    else if (lower.includes('unpaid')) args.status = 'unpaid';
+   377→    else args.status = 'all';
+   378→    return { action: 'list_bills', args, confidence: 0.9 };
+   379→  }
+   380→
+   381→  return null;
+   382→}
+   383→
+   384→function extractClientName(message: string): string {
+   385→  // Try patterns: "for X", "client X", "named X", "নাম X"
+   386→  const patterns = [
+   387→    /(?:for|client|customer|নাম)\s*:?\s*([A-Z][A-Za-z\s]{2,30}?)(?:\s*[,;.]|\s*(?:item|service|phone|email|with|amount|bill|create|add|₹)|$)/i,
+   388→    /(?:named?|name)\s*:?\s*([A-Z][A-Za-z\s]{2,30}?)(?:\s*[,;.]|\s*(?:phone|email|with|item|₹)|$)/i,
+   389→  ];
+   390→
+   391→  for (const p of patterns) {
+   392→    const match = message.match(p);
+   393→    if (match) return match[1].trim();
+   394→  }
+   395→  return '';
+   396→}
+   397→
+   398→function extractItemDescription(message: string): string {
+   399→  // Try to find item/service description
+   400→  const patterns = [
+   401→    /(?:item|service|product|আইটেম|সেবা)\s*(?:is|:)?\s*([A-Za-z\s&]{3,50}?)(?:\s*[,;. ]|$)/i,
+   402→    /(?:for)\s+(?:[\w\s]+\s+)?(?:₹|rs\.?)/i, // "for Digital Marketing ₹10,000"
+   403→  ];
+   404→
+   405→  for (const p of patterns) {
+   406→    const match = message.match(p);
+   407→    if (match && match[1]) return match[1].trim();
+   408→  }
+   409→
+   410→  // Try to extract description between "for" and the amount
+   411→  const forMatch = message.match(/for\s+(.+?)\s+(?:₹|rs\.?|of)/i);
+   412→  if (forMatch) return forMatch[1].trim();
+   413→
+   414→  return '';
+   415→}
+   416→
+   417→// ═══════════════════════════════════════════════════════════════════════════
+   418→// ─── ACTION EXECUTORS ──────────────────────────────────────────────────
+   419→// ═══════════════════════════════════════════════════════════════════════════
+   420→
+   421→async function executeCreateBill(args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   422→  try {
+   423→    const billType = String(args.billType || 'non_gst');
+   424→    const items = (args.items as Array<Record<string, unknown>>) || [];
+   425→    const clientName = String(args.clientName || '');
+   426→    const GST_RATE = 0.18;
+   427→
+   428→    // Find or create client
+   429→    let clientId = '';
+   430→    let clientObj = null;
+   431→    if (clientName) {
+   432→      clientObj = await db.client.findFirst({
+   433→        where: { businessId, name: { contains: clientName, mode: 'insensitive' } },
+   434→      });
+   435→      if (!clientObj) {
+   436→        clientObj = await db.client.create({
+   437→          data: { businessId, name: clientName, phone: String(args.clientPhone || '0000000000'), address: args.clientAddress ? String(args.clientAddress) : null },
+   438→        });
+   439→      }
+   440→      clientId = clientObj.id;
+   441→    } else {
+   442→      const firstClient = await db.client.findFirst({ where: { businessId } });
+   443→      if (firstClient) { clientId = firstClient.id; clientObj = firstClient; }
+   444→    }
+   445→
+   446→    if (!clientId) {
+   447→      return { success: false, result: null, message: '❌ কোনো ক্লায়েন্ট পাওয়া যায়নি। অনুগ্রহ করে ক্লায়েন্টের নাম দিন। / No client found. Please provide a client name.' };
+   448→    }
+   449→
+   450→    if (items.length === 0) {
+   451→      return { success: false, result: null, message: '❌ কোনো আইটেম পাওয়া যায়নি। অনুগ্রহ করে আইটেমের নাম ও মূল্য দিন। / No items found. Please provide item details.' };
+   452→    }
+   453→
+   454→    let subtotal = 0;
+   455→    let totalGst = 0;
+   456→    const processedItems = items.map((item) => {
+   457→      const rate = Number(item.rate) || 0;
+   458→      const qty = Number(item.quantity) || 1;
+   459→      const taxMode = String(item.taxMode || 'excl');
+   460→      const baseRate = taxMode === 'incl' ? rate / (1 + GST_RATE) : rate;
+   461→      const itemGst = billType === 'gst' ? baseRate * GST_RATE * qty : 0;
+   462→      const amount = billType === 'gst'
+   463→        ? (taxMode === 'incl' ? rate * qty : baseRate * (1 + GST_RATE) * qty)
+   464→        : rate * qty;
+   465→      subtotal += baseRate * qty;
+   466→      totalGst += itemGst;
+   467→      return {
+   468→        description: String(item.itemName || ''),
+   469→        quantity: qty, rate, amount,
+   470→        itemName: String(item.itemName || ''),
+   471→        taxMode,
+   472→        cgst: billType === 'gst' ? baseRate * 0.09 * qty : 0,
+   473→        sgst: billType === 'gst' ? baseRate * 0.09 * qty : 0,
+   474→        baseRate,
+   475→      };
+   476→    });
+   477→
+   478→    const total = billType === 'gst' ? subtotal + totalGst : subtotal;
+   479→
+   480→    const bill = await db.bill.create({
+   481→      data: {
+   482→        businessId, clientId,
+   483→        billNumber: `ATS/${new Date().getFullYear().toString().slice(2)}-${String(new Date().getMonth() + 1).padStart(2, '0')}/${String(Math.floor(Math.random() * 900) + 100)}`,
+   484→        date: new Date(),
+   485→        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+   486→        subtotal: billType === 'gst' ? subtotal : total,
+   487→        tax: totalGst, discount: 0, total, billType,
+   488→        clientGst: args.clientGst ? String(args.clientGst) : null,
+   489→        clientAddress: args.clientAddress ? String(args.clientAddress) : null,
+   490→        notes: args.notes ? String(args.notes) : null,
+   491→        items: { create: processedItems },
+   492→      },
+   493→      include: { items: true, client: true },
+   494→    });
+   495→
+   496→    const itemSummary = processedItems.map(i => `  • ${i.itemName}: ₹${i.rate} × ${i.quantity} = ₹${i.amount.toFixed(2)}`).join('\n');
+   497→
+   498→    return {
+   499→      success: true, result: bill,
+   500→      message: `✅ বিল তৈরি হয়েছে! / Bill Created!\n\n📄 Bill #${bill.billNumber}\n👤 Client: ${bill.client.name}\n📋 Items:\n${itemSummary}\n${billType === 'gst' ? `💰 Subtotal: ₹${subtotal.toFixed(2)}\n📊 GST (CGST 9% + SGST 9%): ₹${totalGst.toFixed(2)}\n` : ''}💵 Total: ₹${total.toFixed(2)}\n🏷️ Type: ${billType === 'gst' ? 'GST Bill' : 'Non-GST Bill'}`,
+   501→    };
+   502→  } catch (error) {
+   503→    console.error('[Chat] create_bill error:', error);
+   504→    return { success: false, result: null, message: `❌ বিল তৈরি করতে সমস্যা: ${error instanceof Error ? error.message : 'Unknown error'}` };
+   505→  }
+   506→}
+   507→
+   508→async function executeCreateClient(args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   509→  try {
+   510→    if (!args.name) return { success: false, result: null, message: '❌ ক্লায়েন্টের নাম দিন। / Please provide client name.' };
+   511→    if (!args.phone) return { success: false, result: null, message: '❌ ফোন নম্বর দিন। / Please provide phone number.' };
+   512→
+   513→    const client = await db.client.create({
+   514→      data: {
+   515→        businessId, name: String(args.name), phone: String(args.phone),
+   516→        email: args.email ? String(args.email) : null,
+   517→        address: args.address ? String(args.address) : null,
+   518→        company: args.company ? String(args.company) : null,
+   519→      },
+   520→    });
+   521→    return {
+   522→      success: true, result: client,
+   523→      message: `✅ ক্লায়েন্ট যোগ হয়েছে! / Client Added!\n\n👤 Name: ${client.name}\n📞 Phone: ${client.phone}${client.email ? `\n📧 Email: ${client.email}` : ''}${client.address ? `\n📍 Address: ${client.address}` : ''}${client.company ? `\n🏢 Company: ${client.company}` : ''}`,
+   524→    };
+   525→  } catch (error) {
+   526→    console.error('[Chat] create_client error:', error);
+   527→    return { success: false, result: null, message: `❌ ক্লায়েন্ট যোগ করতে সমস্যা: ${error instanceof Error ? error.message : 'Unknown error'}` };
+   528→  }
+   529→}
+   530→
+   531→async function executeCreateExpense(args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   532→  try {
+   533→    if (!args.amount || Number(args.amount) <= 0) return { success: false, result: null, message: '❌ খরচের পরিমাণ দিন। / Please provide expense amount.' };
+   534→
+   535→    const expense = await db.expense.create({
+   536→      data: {
+   537→        businessId,
+   538→        category: String(args.category || 'Miscellaneous'),
+   539→        description: String(args.description || ''),
+   540→        amount: Number(args.amount),
+   541→        date: new Date(),
+   542→        paymentMethod: args.paymentMethod ? String(args.paymentMethod) : null,
+   543→      },
+   544→    });
+   545→    return {
+   546→      success: true, result: expense,
+   547→      message: `✅ খরচ রেকর্ড হয়েছে! / Expense Recorded!\n\n💰 Amount: ₹${expense.amount}\n📂 Category: ${expense.category}\n📝 Description: ${expense.description}${expense.paymentMethod ? `\n💳 Payment: ${expense.paymentMethod}` : ''}`,
+   548→    };
+   549→  } catch (error) {
+   550→    console.error('[Chat] create_expense error:', error);
+   551→    return { success: false, result: null, message: `❌ খরচ রেকর্ড করতে সমস্যা: ${error instanceof Error ? error.message : 'Unknown error'}` };
+   552→  }
+   553→}
+   554→
+   555→async function executeRecordPayment(args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   556→  try {
+   557→    const clientName = String(args.clientName || '');
+   558→    const amount = Number(args.amount) || 0;
+   559→    const paymentMethod = String(args.paymentMethod || 'Cash');
+   560→
+   561→    if (!clientName) return { success: false, result: null, message: '❌ ক্লায়েন্টের নাম দিন। / Please provide client name.' };
+   562→    if (amount <= 0) return { success: false, result: null, message: '❌ পরিমাণ দিন। / Please provide amount.' };
+   563→
+   564→    const client = await db.client.findFirst({ where: { businessId, name: { contains: clientName, mode: 'insensitive' } } });
+   565→    if (!client) return { success: false, result: null, message: `❌ "${clientName}" নামের ক্লায়েন্ট পাওয়া যায়নি। / Client not found.` };
+   566→
+   567→    let billId: string | null = null;
+   568→    const unpaidBill = await db.bill.findFirst({ where: { businessId, clientId: client.id, status: { in: ['unpaid', 'partial'] } }, orderBy: { date: 'asc' } });
+   569→    if (unpaidBill) billId = unpaidBill.id;
+   570→
+   571→    const payment = await db.payment.create({
+   572→      data: { businessId, clientId: client.id, billId, amount, date: new Date(), paymentMethod, receiptNumber: `RCP-${Date.now().toString().slice(-6)}`, notes: args.notes ? String(args.notes) : null },
+   573→    });
+   574→
+   575→    if (billId) {
+   576→      const bill = await db.bill.findUnique({ where: { id: billId } });
+   577→      if (bill) {
+   578→        const newPaidAmount = bill.paidAmount + amount;
+   579→        await db.bill.update({ where: { id: billId }, data: { paidAmount: newPaidAmount, status: newPaidAmount >= bill.total ? 'paid' : 'partial' } });
+   580→      }
+   581→    }
+   582→
+   583→    return {
+   584→      success: true, result: payment,
+   585→      message: `✅ পেমেন্ট রেকর্ড হয়েছে! / Payment Recorded!\n\n👤 Client: ${client.name}\n💰 Amount: ₹${amount}\n💳 Method: ${paymentMethod}\n🧾 Receipt: ${payment.receiptNumber}`,
+   586→    };
+   587→  } catch (error) {
+   588→    console.error('[Chat] record_payment error:', error);
+   589→    return { success: false, result: null, message: `❌ পেমেন্ট রেকর্ড করতে সমস্যা: ${error instanceof Error ? error.message : 'Unknown error'}` };
+   590→  }
+   591→}
+   592→
+   593→async function executeGetDues(args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   594→  try {
+   595→    const filter = String(args.filter || 'all');
+   596→    const now = new Date();
+   597→    const where: Record<string, unknown> = { businessId, status: { in: ['unpaid', 'partial'] } };
+   598→    if (filter === 'overdue') where.dueDate = { lt: now };
+   599→    else if (filter === 'upcoming') where.dueDate = { gte: now };
+   600→
+   601→    const bills = await db.bill.findMany({ where, include: { client: { select: { name: true } } }, orderBy: { dueDate: 'asc' }, take: 20 });
+   602→    if (bills.length === 0) return { success: true, result: [], message: '✅ কোনো বকেয়া নেই! / No dues found! 🎉' };
+   603→
+   604→    const totalDue = bills.reduce((sum, b) => sum + (b.total - b.paidAmount), 0);
+   605→    const billList = bills.map(b => {
+   606→      const due = b.total - b.paidAmount;
+   607→      const isOverdue = b.dueDate < now;
+   608→      return `  ${isOverdue ? '🔴' : '🟡'} ${b.client.name} - ₹${due.toFixed(2)} (#${b.billNumber}, Due: ${b.dueDate.toLocaleDateString()})`;
+   609→    }).join('\n');
+   610→
+   611→    return { success: true, result: bills, message: `⚠️ বকেয়া তালিকা / Dues:\n\n${billList}\n\n💰 মোট বকেয়া / Total Due: ₹${totalDue.toFixed(2)}` };
+   612→  } catch (error) {
+   613→    return { success: false, result: null, message: `❌ Error: ${error instanceof Error ? error.message : 'Unknown'}` };
+   614→  }
+   615→}
+   616→
+   617→async function executeGetDashboard(args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   618→  try {
+   619→    const period = String(args.period || 'month');
+   620→    const now = new Date();
+   621→    let startDate = new Date(now);
+   622→    switch (period) {
+   623→      case 'today': startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+   624→      case 'week': startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); break;
+   625→      case 'month': startDate = new Date(now.getFullYear(), now.getMonth(), 1); break;
+   626→      case 'year': startDate = new Date(now.getFullYear(), 0, 1); break;
+   627→      default: startDate = new Date(2020, 0, 1);
+   628→    }
+   629→
+   630→    const [bills, expenses, payments, clients] = await Promise.all([
+   631→      db.bill.findMany({ where: { businessId, date: { gte: startDate } } }),
+   632→      db.expense.findMany({ where: { businessId, date: { gte: startDate } } }),
+   633→      db.payment.findMany({ where: { businessId, date: { gte: startDate } } }),
+   634→      db.client.count({ where: { businessId } }),
+   635→    ]);
+   636→
+   637→    const totalRevenue = bills.reduce((s, b) => s + b.total, 0);
+   638→    const totalPaid = bills.reduce((s, b) => s + b.paidAmount, 0);
+   639→    const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+   640→    const totalPaymentsReceived = payments.reduce((s, p) => s + p.amount, 0);
+   641→    const totalDue = totalRevenue - totalPaid;
+   642→    const profit = totalPaid - totalExpenses;
+   643→
+   644→    const periodLabel: Record<string, string> = { today: 'আজ / Today', week: 'এই সপ্তাহ / This Week', month: 'এই মাস / This Month', year: 'এই বছর / This Year', all: 'সব / All Time' };
+   645→
+   646→    return {
+   647→      success: true, result: { totalRevenue, totalPaid, totalExpenses, totalDue, profit, clients },
+   648→      message: `📊 ${periodLabel[period] || periodLabel.month} সারসংক্ষেপ / Summary:\n\n💰 Revenue: ₹${totalRevenue.toFixed(2)}\n💵 Received: ₹${totalPaymentsReceived.toFixed(2)}\n📂 Expenses: ₹${totalExpenses.toFixed(2)}\n⚠️ Outstanding: ₹${totalDue.toFixed(2)}\n📈 Profit: ₹${profit.toFixed(2)}\n👥 Clients: ${clients}`,
+   649→    };
+   650→  } catch (error) {
+   651→    return { success: false, result: null, message: `❌ Error: ${error instanceof Error ? error.message : 'Unknown'}` };
+   652→  }
+   653→}
+   654→
+   655→async function executeListClients(args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   656→  try {
+   657→    const search = String(args.search || '');
+   658→    const where: Record<string, unknown> = { businessId };
+   659→    if (search) where.OR = [{ name: { contains: search, mode: 'insensitive' } }, { phone: { contains: search } }];
+   660→
+   661→    const clients = await db.client.findMany({ where, take: 20, orderBy: { createdAt: 'desc' } });
+   662→    if (clients.length === 0) return { success: true, result: [], message: search ? `🔍 "${search}" - কোনো ক্লায়েন্ট পাওয়া যায়নি।` : '👥 কোনো ক্লায়েন্ট নেই। / No clients yet.' };
+   663→
+   664→    const list = clients.map(c => `  👤 ${c.name} | 📞 ${c.phone}${c.company ? ` | 🏢 ${c.company}` : ''}`).join('\n');
+   665→    return { success: true, result: clients, message: `👥 ক্লায়েন্ট তালিকা / Clients (${clients.length}):\n\n${list}` };
+   666→  } catch (error) {
+   667→    return { success: false, result: null, message: `❌ Error: ${error instanceof Error ? error.message : 'Unknown'}` };
+   668→  }
+   669→}
+   670→
+   671→async function executeListBills(args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   672→  try {
+   673→    const status = String(args.status || 'all');
+   674→    const limit = Number(args.limit) || 10;
+   675→    const where: Record<string, unknown> = { businessId };
+   676→    if (status !== 'all') where.status = status;
+   677→
+   678→    const bills = await db.bill.findMany({ where, include: { client: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: limit });
+   679→    if (bills.length === 0) return { success: true, result: [], message: '📄 কোনো বিল পাওয়া যায়নি। / No bills found.' };
+   680→
+   681→    const list = bills.map(b => {
+   682→      const icon = b.status === 'paid' ? '✅' : b.status === 'partial' ? '🟡' : '🔴';
+   683→      return `  ${icon} #${b.billNumber} | ${b.client.name} | ₹${b.total.toFixed(2)} | ${b.billType.toUpperCase()}`;
+   684→    }).join('\n');
+   685→    return { success: true, result: bills, message: `📄 বিল তালিকা / Bills (${bills.length}):\n\n${list}` };
+   686→  } catch (error) {
+   687→    return { success: false, result: null, message: `❌ Error: ${error instanceof Error ? error.message : 'Unknown'}` };
+   688→  }
+   689→}
+   690→
+   691→async function executeFunction(name: string, args: Record<string, unknown>, businessId: string): Promise<{ success: boolean; result: unknown; message: string }> {
+   692→  switch (name) {
+   693→    case 'create_bill': return executeCreateBill(args, businessId);
+   694→    case 'create_client': return executeCreateClient(args, businessId);
+   695→    case 'create_expense': return executeCreateExpense(args, businessId);
+   696→    case 'record_payment': return executeRecordPayment(args, businessId);
+   697→    case 'get_dues': return executeGetDues(args, businessId);
+   698→    case 'get_dashboard': return executeGetDashboard(args, businessId);
+   699→    case 'list_clients': return executeListClients(args, businessId);
+   700→    case 'list_bills': return executeListBills(args, businessId);
+   701→    default: return { success: false, result: null, message: `❌ Unknown function: ${name}` };
+   702→  }
+   703→}
+   704→
+   705→// ═══════════════════════════════════════════════════════════════════════════
+   706→// ─── MAIN HANDLER ──────────────────────────────────────────────────────
+   707→// ═══════════════════════════════════════════════════════════════════════════
+   708→
+   709→export async function POST(request: NextRequest) {
+   710→  try {
+   711→    const { sessionId, message, context } = await request.json();
+   712→    if (!message || typeof message !== 'string') {
+   713→      return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+   714→    }
+   715→
+   716→    const businessId = context?.businessId || '';
+   717→
+   718→    // Build DB context
+   719→    let dbContext = '';
+   720→    if (businessId) {
+   721→      try {
+   722→        const [clients, recentBills] = await Promise.all([
+   723→          db.client.findMany({ where: { businessId }, take: 20, select: { id: true, name: true, phone: true } }),
+   724→          db.bill.findMany({ where: { businessId }, take: 5, include: { client: { select: { name: true } } }, orderBy: { createdAt: 'desc' } }),
+   725→        ]);
+   726→        dbContext = `\n\nCurrent Data:\nClients: ${JSON.stringify(clients.map(c => ({ id: c.id, name: c.name, phone: c.phone })))}\nRecent Bills: ${JSON.stringify(recentBills.map(b => ({ id: b.id, billNumber: b.billNumber, client: b.client.name, total: b.total, status: b.status, billType: b.billType })))}`;
+   727→      } catch { /* ignore */ }
+   728→    }
+   729→
+   730→    // Get or create conversation
+   731→    let history = conversations.get(sessionId);
+   732→    if (!history) {
+   733→      history = [{ role: 'assistant', content: SYSTEM_PROMPT + dbContext }];
+   734→    } else {
+   735→      history[0] = { role: 'assistant', content: SYSTEM_PROMPT + dbContext };
+   736→    }
+   737→    history.push({ role: 'user', content: message });
+   738→    if (history.length > 22) history = [history[0], ...history.slice(-20)];
+   739→
+   740→    let aiResponse: string | null = null;
+   741→    let actionExecuted = false;
+   742→    let actionData = null;
+   743→
+   744→    // ── STEP 1: Try intent detection (works without LLM!) ──
+   745→    const intent = detectIntent(message);
+   746→
+   747→    if (intent && businessId) {
+   748→      console.log(`[Chat] Detected intent: ${intent.action}`, JSON.stringify(intent.args));
+   749→
+   750→      // Try Gemini function calling first (for more accurate parameter extraction)
+   751→      const geminiResult = await callGemini(history, true);
+   752→
+   753→      if (geminiResult.functionCall) {
+   754→        // Gemini returned a function call - use it (more accurate params)
+   755→        const result = await executeFunction(geminiResult.functionCall.name, geminiResult.functionCall.args, businessId);
+   756→        actionExecuted = result.success;
+   757→        actionData = result.success ? result.result : null;
+   758→
+   759→        if (result.success) {
+   760→          // Send result back to Gemini for natural language formatting
+   761→          history.push({ role: 'function_call', content: JSON.stringify({ name: geminiResult.functionCall.name, args: geminiResult.functionCall.args }) });
+   762→          history.push({ role: 'function_response', content: `${geminiResult.functionCall.name}|||${result.message}` });
+   763→
+   764→          const followUp = await callGemini(history, false);
+   765→          aiResponse = followUp.text || result.message;
+   766→        } else {
+   767→          aiResponse = result.message;
+   768→        }
+   769→      } else if (geminiResult.text) {
+   770→        // Gemini responded with text but we have a detected intent
+   771→        // Execute the action anyway using our detected params
+   772→        const result = await executeFunction(intent.action, intent.args, businessId);
+   773→        actionExecuted = result.success;
+   774→        actionData = result.success ? result.result : null;
+   775→
+   776→        if (result.success) {
+   777→          aiResponse = result.message;
+   778→        } else {
+   779→          aiResponse = geminiResult.text;
+   780→        }
+   781→      } else {
+   782→        // Gemini failed - use our detected intent
+   783→        const result = await executeFunction(intent.action, intent.args, businessId);
+   784→        actionExecuted = result.success;
+   785→        actionData = result.success ? result.result : null;
+   786→        aiResponse = result.message;
+   787→      }
+   788→    } else if (!intent) {
+   789→      // ── STEP 2: No intent detected - use LLM for conversation ──
+   790→      const geminiResult = await callGemini(history, false);
+   791→
+   792→      if (geminiResult.text) {
+   793→        aiResponse = geminiResult.text;
+   794→      }
+   795→
+   796→      // Fallback to ZAI SDK
+   797→      if (!aiResponse) {
+   798→        try {
+   799→          const zai = await getZAI();
+   800→          if (zai) {
+   801→            const zaiMessages = history
+   802→              .filter(m => m.role === 'user' || (m.role === 'assistant' && m !== history![0]))
+   803→              .slice(-10)
+   804→              .map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }));
+   805→            zaiMessages.unshift({ role: 'user', content: SYSTEM_PROMPT });
+   806→
+   807→            const zaiResponse = await zai.chat.completions.create({
+   808→              messages: zaiMessages,
+   809→              thinking: { type: 'disabled' },
+   810→            });
+   811→            aiResponse = zaiResponse?.choices?.[0]?.message?.content || null;
+   812→          }
+   813→        } catch { /* ignore */ }
+   814→      }
+   815→
+   816→      // Smart fallback
+   817→      if (!aiResponse) {
+   818→        const lower = message.toLowerCase();
+   819→        if (lower.match(/হ্যালো|হ্যাই|hello|hi|hey|নমস্কার|কেমন আছ/)) {
+   820→          aiResponse = `নমস্কার! / Hello! 👋\n\nআমি AAROHAN Business Hub এর AI সহকারী। আমি সরাসরি কাজ করতে পারি:\n\n• 📄 "Create a GST bill for ₹10,000 for [Client Name]"\n• 👥 "Add client named [Name], phone [number]"\n• 💰 "Record expense ₹500 for internet"\n• ⚠️ "Show my dues"\n• 📊 "Show dashboard"\n\nকী করতে চান? / What would you like to do?`;
+   821→        } else {
+   822→          aiResponse = `🙏 আমি AAROHAN Business Hub এর AI সহকারী।\n\nআমি সরাসরি কাজ করতে পারি - শুধু বলুন:\n• 📄 "Create a GST bill for ₹10,000 for [name]"\n• 👥 "Add client named Rahul, phone 9876543210"\n• 💰 "Record expense ₹500 for internet"\n• ⚠️ "Show my dues"\n• 📊 "Dashboard summary"\n\nকী করতে চান?`;
+   823→        }
+   824→      }
+   825→    } else {
+   826→      // Intent detected but no businessId
+   827→      aiResponse = '❌ ব্যবসা নির্বাচন করুন। / Please select a business first.';
+   828→    }
+   829→
+   830→    history.push({ role: 'assistant', content: aiResponse });
+   831→    conversations.set(sessionId, history);
+   832→
+   833→    return NextResponse.json({ success: true, response: aiResponse, actionExecuted, actionData });
+   834→  } catch (error) {
+   835→    console.error('Chat API error:', error);
+   836→    return NextResponse.json({ error: 'Failed to get response' }, { status: 500 });
+   837→  }
+   838→}
+   839→
+   840→export async function DELETE(request: NextRequest) {
+   841→  try {
+   842→    const { searchParams } = new URL(request.url);
+   843→    const sessionId = searchParams.get('sessionId');
+   844→    if (sessionId) conversations.delete(sessionId);
+   845→    return NextResponse.json({ success: true });
+   846→  } catch {
+   847→    return NextResponse.json({ error: 'Failed to clear conversation' }, { status: 500 });
+   848→  }
+   849→}
+   850→

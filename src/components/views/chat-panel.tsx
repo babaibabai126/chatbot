@@ -73,9 +73,10 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
   };
 
   const quickActions = [
-    'Create a GST bill for ₹10,000 for Rahul',
-    'Add client named Priya, phone 9876543210',
-    'Show my dues',
+    '📄 বিল বানাও / Create Bill',
+    '👥 ক্লায়েন্ট যোগ কর / Add Client',
+    '💰 খরচ লেখ / Record Expense',
+    '⚠️ বকেয়া দেখাও / Show Dues',
   ];
 
   return (
