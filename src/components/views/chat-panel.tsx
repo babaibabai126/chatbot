@@ -41,12 +41,14 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
     setIsLoading(true);
 
     try {
+      console.log('[Chat] Sending:', text.trim(), 'businessId:', businessId);
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, message: text.trim(), context: { businessId } }),
       });
       const data = await res.json();
+      console.log('[Chat] Response:', data.actionExecuted, data.response?.substring(0, 100));
       if (data.success && data.response) {
         setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: data.response, timestamp: new Date() }]);
         // If action was executed, show notification
@@ -54,7 +56,7 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
           setTimeout(() => {
             setMessages(prev => [...prev, {
               id: `sys-${Date.now()}`, role: 'assistant',
-              content: '✅ Action completed! Check the relevant section to see the changes.',
+              content: '✅ কাজ সম্পন্ন! রিফ্রেশ করে দেখুন। / Action completed! Refresh to see changes.',
               timestamp: new Date()
             }]);
           }, 500);
@@ -71,9 +73,9 @@ export default function ChatPanel({ businessId, businessName }: { businessId: st
   };
 
   const quickActions = [
-    'Create a GST bill for ₹10,000',
-    'Add a new expense',
-    'Show all clients',
+    'Create a GST bill for ₹10,000 for Rahul',
+    'Add client named Priya, phone 9876543210',
+    'Show my dues',
   ];
 
   return (

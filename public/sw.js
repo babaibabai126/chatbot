@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aarohan-hub-v1';
+const CACHE_NAME = 'aarohan-hub-v5';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
