@@ -119,9 +119,9 @@ function detectIntent(message: string): DetectedIntent | null {
   // ── Record Expense ──
   const expensePatterns = [
     /(add|record|log|create|যোগ|রেকর্ড|খরচ|কর)\s*(an?\s*)?(new\s*)?(expense|খরচ|expenditure)/,
-    /(expense|খরচ)\s*(add|record|log|create|যোগ|রেকর্ড|কর|দাও)/,
-    /খরচ\s*(যোগ|কর|দাও|রেকর্ড|হবে|লাগবে|চাই)/,
-    /expense\s*(add|koro|dao|lagbe|chai)/,
+    /(expense|খরচ)\s*(add|record|log|create|যোগ|রেকর্ড|কর|দাও|লেখ|লিখ)/,
+    /খরচ\s*(যোগ|কর|দাও|রেকর্ড|হবে|লাগবে|চাই|লেখ|লিখ)/,
+    /expense\s*(add|koro|dao|lagbe|chai|lekho)/,
   ];
 
   let isExpenseIntent = false;
