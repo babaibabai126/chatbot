@@ -281,20 +281,33 @@ function processPendingReply(message: string, pending: PendingAction): DetectedI
 
   // If user is answering about client name
   if (pending.missingFields.includes('clientName')) {
-    // Try to extract a name - any words that look like a name
-    const nameMatch = message.match(/([A-Z][A-Za-z\s]{1,30})/);
-    if (nameMatch) {
+    // Try to extract a name - must be actual name, not "GST bill" etc
+    const nameMatch = message.match(/^([A-Z][A-Za-z\s]{1,30})$/);
+    if (nameMatch && !nameMatch[1].toLowerCase().match(/^(gst|bill|non|service|expense)/)) {
       pending.args.clientName = nameMatch[1].trim();
       pending.missingFields = pending.missingFields.filter(f => f !== 'clientName');
+    } else {
+      // Try "for X" or "name X" patterns
+      const forName = message.match(/(?:for|name[ds]?|নাম)\s*:?\s*([A-Z][A-Za-z\s]{1,30}?)(?:\s*[,;.]|$)/i);
+      if (forName) {
+        pending.args.clientName = forName[1].trim();
+        pending.missingFields = pending.missingFields.filter(f => f !== 'clientName');
+      }
     }
   }
 
   // If user is answering about name (for client creation)
   if (pending.missingFields.includes('name')) {
-    const nameMatch = message.match(/([A-Z][A-Za-z\s]{1,30})/);
+    const nameMatch = message.match(/^([A-Z][A-Za-z\s]{1,30})$/);
     if (nameMatch) {
       pending.args.name = nameMatch[1].trim();
       pending.missingFields = pending.missingFields.filter(f => f !== 'name');
+    } else {
+      const forName = message.match(/(?:name[ds]?|নাম)\s*:?\s*([A-Z][A-Za-z\s]{1,30}?)(?:\s*[,;.]|$)/i);
+      if (forName) {
+        pending.args.name = forName[1].trim();
+        pending.missingFields = pending.missingFields.filter(f => f !== 'name');
+      }
     }
   }
 
